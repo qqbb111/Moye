@@ -1,0 +1,38 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import type { RypotaBridge } from '../shared/types';
+const subscribe = (channel: string, listener: (...args: any[]) => void) => {
+  const handler = (_event: unknown, ...args: any[]) => listener(...args);
+  ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler);
+};
+const bridge: RypotaBridge = {
+  bootstrap: () => ipcRenderer.invoke('workspace:bootstrap'),
+  newDocument: () => ipcRenderer.invoke('document:new'),
+  openDocuments: () => ipcRenderer.invoke('document:open'),
+  openRecent: path => ipcRenderer.invoke('document:recent', path),
+  activateDocument: id => ipcRenderer.invoke('document:activate', id),
+  reorderDocuments: ids => ipcRenderer.invoke('document:reorder', ids),
+  updateDocument: (id, content, revision) => ipcRenderer.send('document:update', { id, content, revision }),
+  saveDocument: (id, saveAs) => ipcRenderer.invoke('document:save', id, saveAs),
+  organizeImages: id => ipcRenderer.invoke('document:images', id),
+  closeDocument: id => ipcRenderer.invoke('document:close', id),
+  restoreDraft: id => ipcRenderer.invoke('document:restore', id),
+  newWindow: () => ipcRenderer.invoke('window:new'),
+  detachDocument: id => ipcRenderer.invoke('document:detach', id),
+  updatePreferences: preferences => ipcRenderer.invoke('preferences:update', preferences),
+  refreshCodeTheme: () => ipcRenderer.invoke('code-theme:refresh'),
+  windowControl: action => ipcRenderer.send('window:control', action),
+  openExternal: url => ipcRenderer.invoke('link:open', url),
+  openFolder: () => ipcRenderer.invoke('folder:open'),
+  listFolder: path => ipcRenderer.invoke('folder:list', path),
+  openFolderFile: path => ipcRenderer.invoke('folder:file', path),
+  insertImage: (id, data) => ipcRenderer.invoke('image:insert', id, data),
+  exportDocument: (id, format, html) => ipcRenderer.invoke('document:export', id, format, html),
+  fullscreen: () => ipcRenderer.send('window:fullscreen'),
+  clipboard: (action, text) => ipcRenderer.invoke('clipboard:text', action, text),
+  finishClose: token => ipcRenderer.send('window:ready-close', token),
+  onState: listener => subscribe('workspace:state', listener),
+  onCommand: listener => subscribe('app:command', listener),
+  onPrepareClose: listener => subscribe('window:prepare-close', listener),
+  onMessage: listener => subscribe('app:message', listener),
+};
+contextBridge.exposeInMainWorld('rypota', bridge);

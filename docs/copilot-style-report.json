@@ -1,0 +1,84 @@
+{
+  "metrics": {
+    "dpr": 1.25,
+    "prose": {
+      "font": "\"Segoe WPC\", \"Segoe UI\", \"Microsoft YaHei UI\", sans-serif",
+      "size": "15.6px",
+      "lineHeight": "23.4px",
+      "color": "rgb(204, 204, 204)",
+      "background": "rgba(0, 0, 0, 0)",
+      "borderLeft": "0px none rgb(204, 204, 204)",
+      "x": 0,
+      "y": 60,
+      "width": 884,
+      "height": 533
+    },
+    "heading": {
+      "font": "\"Segoe WPC\", \"Segoe UI\", \"Microsoft YaHei UI\", sans-serif",
+      "size": "19.2px",
+      "lineHeight": "24px",
+      "color": "rgb(204, 204, 204)",
+      "background": "rgba(0, 0, 0, 0)",
+      "borderLeft": "0px none rgb(204, 204, 204)",
+      "x": 24,
+      "y": 76,
+      "width": 842.4000244140625,
+      "height": 24
+    },
+    "quote": {
+      "font": "\"Segoe WPC\", \"Segoe UI\", \"Microsoft YaHei UI\", sans-serif",
+      "size": "15.6px",
+      "lineHeight": "23.4px",
+      "color": "rgb(204, 204, 204)",
+      "background": "rgb(43, 43, 43)",
+      "borderLeft": "4.8px solid rgb(97, 97, 97)",
+      "x": 24,
+      "y": 159.40000915527344,
+      "width": 842.4000244140625,
+      "height": 23.399999618530273
+    },
+    "code": {
+      "font": "\"Fira Code\", 霞鹜文楷, \"JetBrains Mono\", Consolas, \"Courier New\", monospace",
+      "size": "16.8px",
+      "lineHeight": "24px",
+      "color": "rgb(204, 204, 204)",
+      "background": "rgba(0, 0, 0, 0)",
+      "borderLeft": "0px none rgb(204, 204, 204)",
+      "x": 34.79999923706055,
+      "y": 298,
+      "width": 820.7999877929688,
+      "height": 120
+    }
+  },
+  "fonts": {
+    "prose": [
+      {
+        "familyName": "Segoe UI Semibold",
+        "postScriptName": "SegoeUI-Semibold",
+        "isCustomFont": false,
+        "glyphCount": 8
+      },
+      {
+        "familyName": "Microsoft YaHei UI",
+        "postScriptName": "MicrosoftYaHeiUI-Bold",
+        "isCustomFont": false,
+        "glyphCount": 13
+      }
+    ],
+    "code": [
+      {
+        "familyName": "Fira Code",
+        "postScriptName": "FiraCode-Regular",
+        "isCustomFont": false,
+        "glyphCount": 17
+      },
+      {
+        "familyName": "LXGW WenKai",
+        "postScriptName": "LXGWWenKai-Regular",
+        "isCustomFont": false,
+        "glyphCount": 5
+      }
+    ]
+  },
+  "errors": []
+}

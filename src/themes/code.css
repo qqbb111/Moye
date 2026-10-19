@@ -1,0 +1,28 @@
+:root {
+  --code-background: #1f1f1f; --code-foreground: #ccc; --code-border: #3c3c3c;
+  --syntax-keyword: #569cd6; --syntax-control: #c586c0; --syntax-type: #4ec9b0;
+  --syntax-function: #dcdcaa; --syntax-variable: #9cdcfe; --syntax-constant: #4fc1ff;
+  --syntax-number: #b5cea8; --syntax-string: #ce9178; --syntax-comment: #6a9955;
+  --syntax-operator: #d4d4d4; --syntax-punctuation: #d4d4d4;
+}
+:root[data-theme] .md-code:not(.md-diagram) { color: var(--code-foreground); background: var(--code-background); border-color: var(--code-border); }
+.code-content .cm-content { color: var(--code-foreground); }
+.code-toolbar { gap: 8px; }
+.code-toolbar input { width: 62px; }
+.code-toolbar .code-copy {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 27px; padding: 4px; border-radius: 4px; flex: 0 0 28px;
+  color: var(--fg); transition: background-color 100ms ease, color 100ms ease;
+}
+.code-copy svg { width: 18px; height: 18px; display: block; pointer-events: none; }
+.code-copy[data-copied='true'] { color: #89d185; }
+:root[data-theme='copilot'] .code-toolbar { gap: 6px; padding: 1px 5px; }
+:root[data-theme='copilot'] .code-toolbar input { width: 62px; }
+.code-theme-setting { display: grid; gap: 5px; padding: 4px 0 6px; }
+#code-theme-select { max-width: 210px; }
+#code-theme-status { margin: 0; line-height: 1.5; }
+.tab { position: relative; user-select: none; }
+.tab.dragging { opacity: .45; }
+.tab.drop-before::before,.tab.drop-after::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: #0078d4; pointer-events: none; z-index: 2; }
+.tab.drop-before::before { left: 0; }
+.tab.drop-after::after { right: 0; }

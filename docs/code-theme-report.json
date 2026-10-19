@@ -1,0 +1,25 @@
+{
+  "packaged": false,
+  "theme": {
+    "name": "Dark Modern",
+    "source": "vscode",
+    "kind": "dark",
+    "palette": {
+      "background": "#1F1F1F",
+      "foreground": "#CCCCCC",
+      "border": "#313131",
+      "keyword": "#569cd6",
+      "control": "#C586C0",
+      "type": "#4EC9B0",
+      "function": "#DCDCAA",
+      "variable": "#9CDCFE",
+      "constant": "#4FC1FF",
+      "number": "#b5cea8",
+      "string": "#ce9178",
+      "comment": "#6A9955",
+      "operator": "#d4d4d4",
+      "punctuation": "#CCCCCC"
+    }
+  },
+  "errors": []
+}

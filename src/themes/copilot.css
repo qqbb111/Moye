@@ -1,0 +1,145 @@
+/* Dark Modern colors and chat proportions, adapted for an editable Markdown page. */
+:root[data-theme='copilot'] {
+  color-scheme: dark;
+  --bg: #181818;
+  --fg: #ccc;
+  --muted: #9d9d9d;
+  --surface: #1f1f1f;
+  --border: #3c3c3c;
+  --hover: #2b2b2b;
+  --link: #4daafc;
+  --code: #1f1f1f;
+  --copilot-body-font: 'Segoe WPC', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  --copilot-code-font: 'Fira Code', '霞鹜文楷', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+}
+
+/* Keep headings and prose in the chat font; editor.fontFamily belongs to code. */
+:root[data-theme='copilot'] .markdown-editor > .cm-scroller {
+  font-family: var(--copilot-body-font) !important;
+  font-size: calc(var(--font-size) * .975);
+  line-height: 1.5 !important;
+}
+
+:root[data-theme='copilot'] .markdown-editor > .cm-scroller > .cm-content {
+  max-width: 960px;
+  padding: 16px 12px 160px 24px !important;
+}
+
+:root[data-theme='copilot'] .cm-line { min-height: 1.5em; }
+
+/* Blank Markdown lines supply the paragraph gap without changing the source. */
+:root[data-theme='copilot'] .markdown-editor > .cm-scroller > .cm-content > .cm-line:has(> br:only-child) {
+  height: calc(var(--font-size) * 1.2);
+  min-height: calc(var(--font-size) * 1.2);
+  line-height: calc(var(--font-size) * 1.2) !important;
+}
+
+:root[data-theme='copilot'] .markdown-editor > .cm-scroller > .cm-content > .md-heading + .cm-line:has(> br:only-child) {
+  height: calc(var(--font-size) * 1.05);
+  min-height: calc(var(--font-size) * 1.05);
+  line-height: calc(var(--font-size) * 1.05) !important;
+}
+
+:root[data-theme='copilot'] .md-heading {
+  border: 0;
+  padding: 0 !important;
+  line-height: 1.25 !important;
+  min-height: 1.25em;
+  font-weight: 600;
+}
+
+:root[data-theme='copilot'] .md-h1 { font-size: 1.5em; }
+:root[data-theme='copilot'] .md-h2 { font-size: 1.230769em; }
+:root[data-theme='copilot'] .md-h3 { font-size: 1.153846em; }
+:root[data-theme='copilot'] .md-h4,
+:root[data-theme='copilot'] .md-h5,
+:root[data-theme='copilot'] .md-h6 { font-size: 1em; color: var(--fg); }
+:root[data-theme='copilot'] .md-strong,
+:root[data-theme='copilot'] .md-strong span,
+:root[data-theme='copilot'] .md-heading span { font-weight: 600 !important; }
+
+:root[data-theme='copilot'] .md-quote {
+  color: var(--fg);
+  background: #2b2b2b;
+  border-left: 5px solid #616161;
+  border-radius: 2px;
+  padding: 0 16px 0 10px !important;
+}
+
+:root[data-theme='copilot'] .md-block { margin: 0; }
+
+:root[data-theme='copilot'] .md-code {
+  border: 1px solid #3c3c3c;
+  border-radius: 7px;
+  background: #1f1f1f;
+  padding: 10px 10px 12px;
+  overflow: visible;
+}
+
+:root[data-theme='copilot'] .code-content .cm-content {
+  padding: 0 !important;
+  caret-color: var(--fg);
+  font-family: var(--copilot-code-font);
+  font-variant-ligatures: normal;
+  font-feature-settings: 'calt' 1, 'liga' 1;
+}
+
+:root[data-theme='copilot'] .code-content .cm-scroller {
+  font-family: var(--copilot-code-font) !important;
+  font-size: calc(var(--font-size) * 1.05);
+  line-height: calc(var(--font-size) * 1.5) !important;
+}
+
+:root[data-theme='copilot'] .code-content .cm-line {
+  min-height: calc(var(--font-size) * 1.5);
+}
+
+:root[data-theme='copilot'] .code-toolbar {
+  position: absolute;
+  right: 9px;
+  top: -18px;
+  z-index: 2;
+  height: 31px;
+  padding: 2px 5px;
+  gap: 8px;
+  background: #202020;
+  border: 1px solid #3c3c3c;
+  border-radius: 7px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease;
+}
+
+:root[data-theme='copilot'] .md-code:hover .code-toolbar,
+:root[data-theme='copilot'] .md-code:focus-within .code-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:root[data-theme='copilot'] .code-toolbar input { width: 90px; }
+:root[data-theme='copilot'] .code-toolbar button { color: var(--fg); }
+
+:root[data-theme='copilot'] .md-inline-code {
+  background: #3c3c3c;
+  color: #d0d0d0;
+  border: 0;
+  font-family: var(--copilot-code-font);
+}
+
+:root[data-theme='copilot'] .cm-editor[data-source='true'] > .cm-scroller,
+:root[data-theme='copilot'] .cm-editor[data-source='true'] .cm-content,
+:root[data-theme='copilot'] .md-nested-code,
+:root[data-theme='copilot'] .md-frontmatter {
+  font-family: var(--copilot-code-font) !important;
+  font-variant-ligatures: normal;
+}
+
+:root[data-theme='copilot'] .md-rule hr { border-color: #31363b; }
+:root[data-theme='copilot'] .md-table { padding-top: 24px; }
+:root[data-theme='copilot'] .md-diagram { padding: 10px; border: 0; background: transparent; }
+:root[data-theme='copilot'] .md-diagram:not(:hover):not(:focus-within) .code-toolbar { display: none; }
+
+:root[data-theme='copilot'] .cm-scroller::-webkit-scrollbar { width: 6px; height: 6px; }
+:root[data-theme='copilot'] .cm-scroller::-webkit-scrollbar-track { background: transparent; }
+:root[data-theme='copilot'] .cm-scroller::-webkit-scrollbar-thumb { background: #79797966; border-radius: 3px; }
+:root[data-theme='copilot'] .cm-scroller::-webkit-scrollbar-thumb:hover { background: #797979aa; }

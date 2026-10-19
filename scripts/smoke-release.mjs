@@ -1,0 +1,32 @@
+import { _electron, expect } from '@playwright/test';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+const root = process.cwd();
+const directory = path.join(root, '.test-data', `release-${randomUUID()}`);
+await fs.mkdir(directory, { recursive: true });
+await fs.mkdir(path.join(root, 'docs'), { recursive: true });
+const env = Object.fromEntries(Object.entries({ ...process.env, TYPORA_REPLICA_TEST: '1', TYPORA_REPLICA_USER_DATA: path.join(directory, 'profile') }).filter(([key, value]) => key !== 'ELECTRON_RUN_AS_NODE' && typeof value === 'string'));
+const application = await _electron.launch({ executablePath: path.join(root, 'release/Typora Replica-win32-x64/Typora Replica.exe'), args: [], cwd: root, env });
+try {
+  const page = await application.firstWindow();
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.locator('.rich-editor[data-ready="true"]').waitFor();
+  await expect(page.locator('.editor-slot:not([hidden]) h1')).toHaveText('给灵感，留一点空白');
+  await page.screenshot({ path: path.join(root, 'docs/preview.png') });
+  await page.locator('#toggle-theme').click(); await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.screenshot({ path: path.join(root, 'docs/preview-dark.png') });
+  await page.locator('#toggle-theme').click();
+  await page.locator('#add-tab').click(); await page.locator('.editor-slot:not([hidden]) .rich-editor[data-ready="true"]').waitFor();
+  await page.locator('.editor-slot:not([hidden]) .ProseMirror').click(); await page.keyboard.type('# '); await page.keyboard.insertText('便携版标题');
+  await expect(page.locator('.editor-slot:not([hidden]) h1')).toHaveText('便携版标题');
+  const file = path.join(directory, '便携版保存.md');
+  await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file);
+  await page.locator('#save-document').click(); await expect.poll(() => fs.readFile(file, 'utf8').catch(() => '')).toContain('# 便携版标题');
+  await fs.copyFile(path.join(root, 'assets/rypota.png'), path.join(directory, '本地图片.png'));
+  await page.locator('#source-mode').click(); await page.locator('.editor-slot:not([hidden]) textarea').fill('# 图片验证\n\n![本地图片](本地图片.png)\n');
+  await page.locator('#rich-mode').click();
+  await expect.poll(() => page.locator('.editor-slot:not([hidden]) img').evaluateAll(images => images.some(image => image.complete && image.naturalWidth > 0))).toBe(true);
+  expect(errors).toEqual([]);
+  console.log(JSON.stringify({ portableExecutable: 'release/Typora Replica-win32-x64/Typora Replica.exe', checks: ['standalone-launch', 'light-theme', 'dark-theme', 'typed-markdown-input-rule', 'utf8-file-save', 'relative-image-protocol'], passed: true }, null, 2));
+} finally { await application.close(); }

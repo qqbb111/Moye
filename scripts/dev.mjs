@@ -1,0 +1,14 @@
+import { createServer } from 'vite';
+import { build } from 'esbuild';
+import { spawn } from 'node:child_process';
+import electron from 'electron';
+await build({ entryPoints: ['electron/main.ts'], outfile: 'dist-electron/main.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', mainFields: ['module', 'main'], external: ['electron'] });
+await build({ entryPoints: ['electron/preload.ts'], outfile: 'dist-electron/preload.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });
+const server = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: false } });
+await server.listen();
+const address = server.httpServer.address();
+const env = { ...process.env, TYPORA_REPLICA_DEV_URL: `http://127.0.0.1:${address.port}` };
+delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(electron, ['.'], { stdio: 'inherit', env, windowsHide: true });
+child.on('exit', async (code) => { await server.close(); process.exit(code ?? 0); });
+process.on('SIGINT', () => child.kill());
