@@ -26,3 +26,51 @@
 .tab.drop-before::before,.tab.drop-after::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: #0078d4; pointer-events: none; z-index: 2; }
 .tab.drop-before::before { left: 0; }
 .tab.drop-after::after { right: 0; }
+
+/* A code block is a small workspace: a quiet header and an independent scroller. */
+:root[data-theme] .md-code:not(.md-diagram) {
+  min-width: 0; max-width: 100%; padding: 0; border-radius: 10px;
+  overflow: hidden; border-color: var(--code-border); box-shadow: 0 2px 8px #00000008;
+}
+:root[data-theme] .md-code .code-toolbar {
+  position: relative; inset: auto; z-index: auto; display: flex; align-items: center;
+  height: 39px; padding: 5px 10px 5px 14px; gap: 10px;
+  color: var(--muted); background: color-mix(in srgb, var(--code-background) 94%, white);
+  border: 0; border-bottom: 1px solid var(--code-border); border-radius: 0;
+  opacity: 1; pointer-events: auto; font: 11px/1.4 var(--ui-font);
+}
+:root[data-theme] .code-toolbar input {
+  width: 88px; max-width: 110px; height: 25px; padding: 3px 7px;
+  color: var(--code-foreground); border-radius: 5px; font: 12px/1.4 var(--ui-font);
+}
+:root[data-theme] .code-toolbar input:hover { background: #ffffff0a; }
+:root[data-theme] .code-toolbar input:focus { outline: 1px solid var(--link); background: #ffffff0a; }
+.code-lines { flex: 1; font-variant-numeric: tabular-nums; color: var(--code-foreground); opacity: .6; }
+:root[data-theme] .code-toolbar .code-copy,
+:root[data-theme] .code-toolbar .code-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 27px; flex: 0 0 28px; padding: 5px; border-radius: 5px;
+  color: var(--code-foreground); opacity: .72; background: transparent;
+}
+:root[data-theme] .code-toolbar button:hover,
+:root[data-theme] .code-toolbar button:focus-visible { background: #ffffff13; opacity: 1; }
+:root[data-theme] .code-toolbar .code-wrap[aria-pressed='true'] { background: #7fbbdf26; color: #b3dcf5; opacity: 1; }
+:root[data-theme] .code-toolbar .code-copy[data-copied='true'] { color: #a9d7b4; opacity: 1; }
+.code-content { min-width: 0; }
+:root[data-theme] .code-content .cm-scroller {
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, '霞鹜文楷', 'LXGW WenKai', monospace !important;
+  font-size: max(13px, calc(var(--font-size) * .9)); line-height: 1.7 !important;
+  overflow-x: auto !important; overscroll-behavior-x: contain; tab-size: 4;
+}
+:root[data-theme] .code-content .cm-content {
+  width: auto; min-width: 100%; max-width: none; margin: 0 !important;
+  padding: 15px 18px 18px !important; font-family: inherit;
+  font-variant-ligatures: none; font-feature-settings: 'calt' 0, 'liga' 0;
+  font-style: normal;
+}
+:root[data-theme] .code-content .cm-line { min-height: 1.7em; line-height: 1.7; }
+:root[data-theme] .code-content .cm-cursor { border-left-color: var(--code-foreground) !important; }
+:root[data-theme] .code-content .cm-selectionBackground { background: #75b9eb40 !important; }
+:root[data-theme] .code-content .cm-scroller::-webkit-scrollbar { height: 9px; }
+:root[data-theme] .code-content .cm-scroller::-webkit-scrollbar-thumb { border: 2px solid var(--code-background); border-radius: 8px; background: #8e98a553; }
+:root[data-theme] .md-inline-code { font-size: .88em; padding: .12em .32em; border-radius: 4px; }

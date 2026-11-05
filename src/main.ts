@@ -18,14 +18,14 @@ import type { WorkspaceView, DocumentView, ActionResult, FolderEntry } from '../
 const bridge = window.rypota;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const app = $('#app');
-app.innerHTML = `<header class="titlebar"><span class="app-mark" title="Typora Replica">${icon('markdown')}</span><span id="caption">未命名 — Typora Replica</span><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
-  <nav class="menubar" aria-label="应用菜单">${['文件', '编辑', '段落', '格式', '视图', '主题', '帮助'].map((label, index) => `<button data-menu-index="${index}" aria-haspopup="true">${label}</button>`).join('')}</nav>
-  <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-heading"><strong id="folder-name">文档</strong><button id="sidebar-close" aria-label="关闭侧栏" title="关闭侧栏">${icon('close')}</button></div><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><div id="sidebar-content"></div><button id="open-folder" class="sidebar-bottom">${icon('folder-opened')}打开文件夹…</button></aside>
-  <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="word-count" title="字数统计">0 字</button><span id="mode-label"></span></footer></main></div>
+app.innerHTML = `<header class="titlebar"><span class="app-mark" title="Typora Replica">${icon('markdown')}<span class="brand-name">Replica</span></span><span id="caption">未命名 — Typora Replica</span><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
+  <nav class="menubar" aria-label="应用菜单">${['文件', '编辑', '段落', '格式', '视图', '主题', '帮助'].map((label, index) => `<button data-menu-index="${index}" aria-haspopup="true">${label}</button>`).join('')}<span class="menu-spacer"></span><div class="quick-actions"><button data-command="quick-open" aria-label="快速打开" title="快速打开 Ctrl+P">${icon('search')}</button><button data-command="focus" aria-label="专注写作" title="专注写作 F8">${icon('layout-centered')}</button><button data-command="preferences" aria-label="偏好设置" title="偏好设置 Ctrl+,">${icon('settings-gear')}</button></div></nav>
+  <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-heading"><strong id="folder-name">文档</strong><button id="sidebar-close" aria-label="关闭侧栏" title="关闭侧栏">${icon('close')}</button></div><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><label class="sidebar-filter">${icon('filter')}<input id="sidebar-filter" type="search" aria-label="筛选侧栏" placeholder="筛选当前列表…" autocomplete="off"></label><div id="sidebar-content"></div><button id="open-folder" class="sidebar-bottom">${icon('folder-opened')}打开文件夹…</button></aside><div id="sidebar-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="256" tabindex="0" hidden></div>
+  <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="reading-width" aria-label="阅读宽度" title="切换阅读宽度">${icon('layout-centered')}<span>适中</span></button><span id="reading-time"></span><button id="word-count" title="字数统计">0 字</button><span id="mode-label"></span></footer></main></div>
   <div id="menu" role="menu" hidden></div><div id="toast" role="status" hidden></div>
-  <dialog id="preferences"><form method="dialog"><h2>偏好设置</h2><label>主题<select id="theme-select"><option value="light">白色</option><option value="dark">夜间</option><option value="copilot">Copilot 深色</option></select></label><div class="code-theme-setting"><label>代码配色<select id="code-theme-select"><option value="modern-dark">现代深色</option><option value="vscode">跟随本机 VS Code</option></select></label><p id="code-theme-status"></p></div><label>正文字号<input id="font-size" type="number" min="14" max="24"></label><label><input id="format-save-toggle" type="checkbox">保存前整理中文排版（含自动保存）</label><p>默认关闭。开启后整理正文空格和常见标点，保留代码、公式和地址；可以撤销。</p><label><input id="autosave-toggle" type="checkbox">自动保存已打开的文件</label><p>未命名文档会保存为本地草稿，重新打开后恢复。</p><label><input id="tabs-toggle" type="checkbox">多个文档显示标签页</label><label><input id="focus-toggle" type="checkbox">专注模式</label><label><input id="typewriter-toggle" type="checkbox">打字机模式</label><div class="dialog-buttons"><button value="cancel">关闭</button><button id="preferences-apply" value="default">应用</button></div></form></dialog>
-  <dialog id="quick-open"><h2>快速打开</h2><input id="quick-input" placeholder="输入文件名…" aria-label="快速打开文件名"><div id="quick-results"></div><button id="quick-close">关闭</button></dialog>
-  <dialog id="about"><h2>Typora Replica</h2><p>一个保留 Markdown 原文的即时排版编辑器。</p><p>版本 0.2.0 · 独立实现</p><p>Ctrl+/ 源码 · Ctrl+S 保存 · Ctrl+Shift+N 新窗口</p><button id="about-close">关闭</button></dialog>`;
+  <dialog id="preferences"><form method="dialog"><h2>偏好设置</h2><label>主题<select id="theme-select"><option value="light">白色</option><option value="dark">夜间</option><option value="copilot">Copilot 深色</option></select></label><div class="code-theme-setting"><label>代码配色<select id="code-theme-select"><option value="modern-dark">现代深色</option><option value="vscode">跟随本机 VS Code</option></select></label><p id="code-theme-status"></p></div><label>正文字号<input id="font-size" type="number" min="14" max="24"></label><label>阅读宽度<select id="reading-width-select"><option value="720">紧凑 · 720</option><option value="880">适中 · 880</option><option value="1080">宽阔 · 1080</option></select></label><label><input id="code-wrap-toggle" type="checkbox">代码自动换行（代码块内 Alt+Z）</label><label><input id="format-save-toggle" type="checkbox">保存前整理中文排版（含自动保存）</label><p>默认关闭。开启后整理正文空格和常见标点，保留代码、公式和地址；可以撤销。</p><label><input id="autosave-toggle" type="checkbox">自动保存已打开的文件</label><p>未命名文档会保存为本地草稿，重新打开后恢复。</p><label><input id="tabs-toggle" type="checkbox">多个文档显示标签页</label><label><input id="focus-toggle" type="checkbox">专注模式</label><label><input id="typewriter-toggle" type="checkbox">打字机模式</label><div class="dialog-buttons"><button value="cancel">关闭</button><button id="preferences-apply" value="default">应用</button></div></form></dialog>
+  <dialog id="quick-open"><h2>快速打开</h2><input id="quick-input" placeholder="搜索标题或路径…" aria-label="快速打开文件名" role="combobox" aria-controls="quick-results" aria-expanded="true" aria-autocomplete="list" autocomplete="off"><div id="quick-results" role="listbox" aria-label="文件搜索结果"></div><p class="quick-help"><kbd>↑ ↓</kbd> 选择 <kbd>Enter</kbd> 打开 <kbd>Esc</kbd> 返回写作</p><button id="quick-close">关闭</button></dialog>
+  <dialog id="about"><h2>Typora Replica</h2><p>一个保留 Markdown 原文的即时排版编辑器。</p><p>版本 0.3.0 · 中文写作与代码笔记</p><p>Ctrl+/ 源码 · Ctrl+S 保存 · Ctrl+Shift+N 新窗口</p><button id="about-close">关闭</button></dialog>`;
 
 let workspace: WorkspaceView;
 let library = 'outline'; let folder: { path: string; entries: FolderEntry[] } | null = null;
@@ -33,6 +33,8 @@ const slots = new Map<string, { element: HTMLElement; editor: MarkdownEditor; ap
 const pendingImages = new Set<Promise<void>>();
 let toastTimer: ReturnType<typeof setTimeout>; let renderPending = false; let openedMenu = -1;
 let tabSignature = ''; let draggedTab: string | null = null;
+let sidebarSignature = ''; let resizingSidebar = false; let quickSelection = 0;
+const expandedFolders = new Set<string>();
 const nameOf = (file: string) => file.split(/[\\/]/).pop() ?? file;
 const activeDocument = () => workspace?.documents.find(doc => doc.id === workspace.activeId);
 const activeEditor = () => slots.get(workspace?.activeId ?? '')?.editor;
@@ -63,7 +65,7 @@ function link(url: string) {
 function ensureEditor(doc: DocumentView) {
   if (slots.has(doc.id)) return;
   const element = document.createElement('div'); element.className = 'editor-slot'; element.dataset.documentId = doc.id; element.hidden = doc.id !== workspace.activeId; $('#editor-stage').append(element);
-  const editor = new MarkdownEditor(element, doc.content, { id: doc.id, media: url => media(doc.id, url), link, changed: content => changed(doc.id, content) });
+  const editor = new MarkdownEditor(element, doc.content, { id: doc.id, media: url => media(doc.id, url), link, changed: content => changed(doc.id, content), codeWrap: () => !!workspace.preferences.codeWrap, setCodeWrap: value => { void run(() => bridge.updatePreferences({ codeWrap: value })); } });
   slots.set(doc.id, { element, editor, applying: false });
   element.addEventListener('paste', event => {
     let file = [...(event.clipboardData?.files ?? [])].find(file => file.type.startsWith('image/'));
@@ -105,6 +107,11 @@ function endTabDrag() {
   draggedTab = null; dragX = null; cancelAnimationFrame(dragFrame); dragFrame = 0; clearTabDrop(); $('#tabbar').classList.remove('drag-over');
   for (const tab of document.querySelectorAll('.tab.dragging')) tab.classList.remove('dragging'); renderTabs();
 }
+function moveTab(moved: string, before: string | null) {
+  if (!workspace.documents.some(doc => doc.id === moved)) return;
+  const ids = workspace.documents.map(doc => doc.id).filter(id => id !== moved); const index = before ? ids.indexOf(before) : -1;
+  ids.splice(index < 0 ? ids.length : index, 0, moved); void run(() => bridge.reorderDocuments(ids));
+}
 const acceptTabDrag = (event: DragEvent) => {
   if (!draggedTab || !event.dataTransfer) return;
   event.preventDefault(); event.dataTransfer.dropEffect = 'move'; dragX = event.clientX; markTabDrop(dragX); $('#tabbar').classList.add('drag-over');
@@ -119,8 +126,7 @@ $('#tabbar').ondrop = event => {
   if (!draggedTab) return; event.preventDefault(); event.stopPropagation();
   const moved = draggedTab; const before = markTabDrop(event.clientX); const valid = event.dataTransfer?.getData('application/x-replica-tab') === moved;
   endTabDrag(); if (!valid || !workspace.documents.some(doc => doc.id === moved)) return;
-  const ids = workspace.documents.map(doc => doc.id).filter(id => id !== moved); const index = before ? ids.indexOf(before) : -1;
-  ids.splice(index < 0 ? ids.length : index, 0, moved); void run(() => bridge.reorderDocuments(ids));
+  moveTab(moved, before);
 };
 function renderTabs() {
   if (draggedTab) return;
@@ -128,9 +134,30 @@ function renderTabs() {
   if (signature === tabSignature) return; tabSignature = signature;
   $('#tabs').replaceChildren();
   for (const item of workspace.documents) {
-    const tab = document.createElement('div'); tab.className = `tab ${item.id === workspace.activeId ? 'active' : ''}`; tab.role = 'tab'; tab.dataset.id = item.id; tab.setAttribute('aria-selected', String(item.id === workspace.activeId)); tab.tabIndex = 0; tab.title = item.path ?? '本地草稿'; tab.draggable = true;
+    const tab = document.createElement('div'); tab.className = `tab ${item.id === workspace.activeId ? 'active' : ''}`; tab.role = 'tab'; tab.dataset.id = item.id; tab.setAttribute('aria-selected', String(item.id === workspace.activeId)); tab.tabIndex = 0; tab.title = item.path ?? '本地草稿'; tab.draggable = false;
     const label = document.createElement('span'); label.className = 'tab-label'; label.textContent = item.title + (item.dirty && item.path ? ' ●' : ''); const close = document.createElement('button'); close.className = 'tab-close'; close.innerHTML = icon('close'); close.draggable = false; close.title = `关闭 ${item.title}`; close.setAttribute('aria-label', `关闭 ${item.title}`); close.onclick = event => { event.stopPropagation(); flushAll(); void run(() => bridge.closeDocument(item.id)); };
-    tab.innerHTML = icon('markdown').replace('class="replica-icon"', 'class="replica-icon tab-file-icon"'); tab.append(label, close); tab.onclick = () => { flushAll(); void run(() => bridge.activateDocument(item.id)); }; tab.onkeydown = event => { if (event.key === 'Enter') tab.click(); };
+    let skipClick = false;
+    tab.innerHTML = icon('markdown').replace('class="replica-icon"', 'class="replica-icon tab-file-icon"'); tab.append(label, close); tab.onclick = () => { if (skipClick) { skipClick = false; return; } flushAll(); void run(async () => { const result = await bridge.activateDocument(item.id); activeEditor()?.focus(); return result; }); }; tab.onkeydown = event => { if (event.key === 'Enter') tab.click(); };
+    tab.onpointerdown = event => {
+      if (event.button !== 0 || (event.target as HTMLElement).closest('.tab-close')) return;
+      const originX = event.clientX, originY = event.clientY; const previousFocus = document.activeElement as HTMLElement | null; let started = false;
+      tab.setPointerCapture(event.pointerId);
+      const inside = (event: PointerEvent) => { const box = $('#tabbar').getBoundingClientRect(); return event.clientY >= box.top && event.clientY <= box.bottom && event.clientX >= box.left && event.clientX <= box.right; };
+      tab.onpointermove = event => {
+        if (!started && Math.hypot(event.clientX - originX, event.clientY - originY) < 6) return;
+        if (!started) { started = true; draggedTab = item.id; tab.classList.add('dragging'); }
+        event.preventDefault();
+        if (inside(event)) { dragX = event.clientX; markTabDrop(dragX); $('#tabbar').classList.add('drag-over'); if (!dragFrame) dragFrame = requestAnimationFrame(scrollTabDrag); }
+        else { dragX = null; clearTabDrop(); $('#tabbar').classList.remove('drag-over'); }
+      };
+      const finish = (event: PointerEvent) => {
+        tab.onpointermove = null; tab.onpointerup = null; tab.onpointercancel = null;
+        if (!started) return; const before = inside(event) ? markTabDrop(event.clientX) : null; const accepted = event.type !== 'pointercancel' && inside(event);
+        skipClick = true; setTimeout(() => { skipClick = false; }, 0); endTabDrag(); if (accepted) moveTab(item.id, before);
+        if (previousFocus?.isConnected && $('#editor-stage').contains(previousFocus)) previousFocus.focus(); else activeEditor()?.focus();
+      };
+      tab.onpointerup = finish; tab.onpointercancel = finish;
+    };
     tab.ondragstart = event => { if (!event.dataTransfer || (event.target as HTMLElement).closest('.tab-close')) { event.preventDefault(); return; } draggedTab = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-replica-tab', item.id); tab.classList.add('dragging'); };
     tab.ondragend = endTabDrag;
     $('#tabs').append(tab);
@@ -141,6 +168,12 @@ function currentStatistics() { const source = activeDocument()?.content ?? ''; i
 function render() {
   if (!workspace) return; const doc = activeDocument(); const editor = activeEditor(); const preferences = workspace.preferences;
   document.documentElement.dataset.theme = preferences.theme; document.documentElement.style.setProperty('--font-size', `${preferences.fontSize}px`);
+  document.documentElement.style.setProperty('--reading-width', `${preferences.readingWidth ?? 880}px`);
+  if (!resizingSidebar) document.documentElement.style.setProperty('--sidebar-width', `${preferences.sidebarWidth ?? 256}px`);
+  $('#sidebar-resize').hidden = !preferences.sidebar; $('#sidebar-resize').setAttribute('aria-valuenow', String(preferences.sidebarWidth ?? 256));
+  for (const slot of slots.values()) slot.editor.setCodeWrap(!!preferences.codeWrap);
+  const width = preferences.readingWidth ?? 880; $('#reading-width span').textContent = width < 800 ? '紧凑' : width > 960 ? '宽阔' : '适中';
+  $('#reading-width').title = `阅读宽度 ${width}，点击切换`;
   const maximize = $('[data-control="maximize"]'); const maximizeIcon = workspace.maximized ? 'chrome-restore' : 'chrome-maximize';
   if (maximize.querySelector('svg')?.dataset.icon !== maximizeIcon) maximize.innerHTML = icon(maximizeIcon);
   maximize.title = workspace.maximized ? '还原' : '最大化'; maximize.setAttribute('aria-label', maximize.title);
@@ -156,25 +189,36 @@ function render() {
   $('#empty').hidden = Boolean(doc); $('#editor-stage').hidden = !doc;
   $('#source-mode').classList.toggle('active', !!editor?.source); $('#mode-label').textContent = editor?.source ? '源码模式' : preferences.focus ? '专注模式' : preferences.typewriter ? '打字机模式' : '';
   $('#save-status').textContent = doc?.error ?? (doc ? doc.status === 'saving' ? '保存中…' : doc.draftRevision < doc.revision ? '保存草稿…' : doc.path ? doc.dirty ? '修改已保留' : '已保存' : doc.content ? '草稿已保存' : '' : ''); $('#save-status').classList.toggle('error', !!doc?.error);
-  $('#word-count').textContent = `${currentStatistics().words.toLocaleString()} 字`; renderSidebar();
+  $('#save-status').dataset.state = doc?.error ? 'error' : doc?.status === 'saving' || (doc && doc.draftRevision < doc.revision) ? 'pending' : doc?.path && !doc.dirty ? 'saved' : 'draft';
+  $('#save-status').title = doc?.error ?? (doc?.path ? `${doc.path}${doc.savedAt ? ' · 上次保存：' + new Date(doc.savedAt).toLocaleTimeString() : ''}` : '草稿仅保存在本机，Ctrl+S 可保存为文件');
+  const words = currentStatistics().words; $('#word-count').textContent = `${words.toLocaleString()} 字`;
+  $('#reading-time').textContent = words >= 400 ? `约 ${Math.ceil(words / 400)} 分钟` : ''; renderSidebar();
 }
 function row(label: string, action: () => void, title = '', glyph?: IconName) { const element = document.createElement('button'); element.className = 'sidebar-row'; if (glyph) { element.classList.add('has-icon'); element.innerHTML = icon(glyph); const text = document.createElement('span'); text.className = 'row-label'; text.textContent = label; element.append(text); } else element.textContent = label; element.title = title; element.onclick = action; return element; }
 function renderSidebar() {
   if ($('#sidebar').hidden) return;
+  const query = $<HTMLInputElement>('#sidebar-filter').value.trim().toLocaleLowerCase();
+  const matches = (text: string) => text.toLocaleLowerCase().includes(query);
+  const outline = library === 'outline' ? headings(activeDocument()?.content ?? '') : [];
+  const signature = JSON.stringify([library, query, workspace.activeId, outline, workspace.documents.map(d => [d.id, d.title, d.path]), workspace.drafts.map(d => [d.id, d.title]), workspace.recent, folder?.path, folder?.entries]);
+  if (signature === sidebarSignature) return; sidebarSignature = signature;
+  const empty = (text: string) => { const hint = document.createElement('p'); hint.className = 'sidebar-empty'; hint.textContent = text; return hint; };
   const container = $('#sidebar-content'); container.replaceChildren();
   for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) button.classList.toggle('active', button.dataset.library === library);
-  $('#folder-name').textContent = library === 'files' && folder ? nameOf(folder.path) : library === 'outline' ? '大纲' : library === 'drafts' ? '草稿' : '文档';
+  $('#folder-name').textContent = library === 'files' && folder ? nameOf(folder.path) : library === 'outline' ? activeDocument()?.title ?? '文档大纲' : library === 'drafts' ? '本机草稿' : '文档';
+  $('#folder-name').title = library === 'outline' ? activeDocument()?.path ?? '本机草稿' : library === 'files' ? folder?.path ?? '' : '';
   if (library === 'outline') {
-    const doc = activeDocument(); if (!doc) return; for (const heading of headings(doc.content)) { const element = row(heading.text, () => { const editor = activeEditor()!; editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); }); element.style.paddingLeft = `${18 + (heading.level - 1) * 12}px`; element.dataset.level = String(heading.level); container.append(element); }
-    if (!container.childElementCount) container.append(row('暂无标题', () => activeEditor()?.focus()));
+    const doc = activeDocument(); if (!doc) return; for (const heading of outline.filter(heading => matches(heading.text))) { const element = row(heading.text, () => { const editor = activeEditor()!; editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); }); element.style.paddingLeft = `${18 + (heading.level - 1) * 12}px`; element.dataset.level = String(heading.level); container.append(element); }
+    if (!container.childElementCount) container.append(empty(query ? '没有匹配的标题' : '用 # 写下标题，这里就会出现文档目录。'));
   } else if (library === 'drafts') {
-    for (const doc of workspace.drafts) container.append(row(doc.title, () => void run(() => bridge.restoreDraft(doc.id)), '恢复草稿', 'history'));
-    if (!container.childElementCount) container.append(row('关闭的未命名文档会保留在这里', () => {}));
+    for (const doc of workspace.drafts.filter(doc => matches(doc.title))) container.append(row(doc.title, () => void run(() => bridge.restoreDraft(doc.id)), '恢复草稿', 'history'));
+    if (!container.childElementCount) container.append(empty(query ? '没有匹配的草稿' : '关闭的未命名文档会保留在这里。'));
   } else {
     const title = document.createElement('div'); title.className = 'sidebar-section'; title.textContent = '已打开'; container.append(title);
-    for (const doc of workspace.documents) { const element = row(doc.title, () => { flushAll(); void run(() => bridge.activateDocument(doc.id)); }, doc.path ?? '本地草稿', 'markdown'); element.classList.toggle('selected', doc.id === workspace.activeId); container.append(element); }
-    if (folder) { const heading = document.createElement('div'); heading.className = 'sidebar-section'; heading.textContent = '文件夹'; container.append(heading); renderTree(container, folder.entries, 0); }
-    else for (const file of workspace.recent.slice(0, 10)) container.append(row(nameOf(file), () => void run(() => bridge.openRecent(file)), file, 'markdown'));
+    for (const doc of workspace.documents.filter(doc => matches(doc.title + ' ' + (doc.path ?? '')))) { const element = row(doc.title, () => { flushAll(); void run(() => bridge.activateDocument(doc.id)); }, doc.path ?? '本地草稿', 'markdown'); element.classList.toggle('selected', doc.id === workspace.activeId); container.append(element); }
+    if (folder) { const heading = document.createElement('div'); heading.className = 'sidebar-section'; heading.textContent = '文件夹'; container.append(heading); renderTree(container, query ? folder.entries.filter(entry => !entry.directory && matches(entry.name)) : folder.entries, 0); }
+    else for (const file of workspace.recent.filter(file => matches(file)).slice(0, 10)) container.append(row(nameOf(file), () => void run(() => bridge.openRecent(file)), file, 'markdown'));
+    if (query && !container.querySelector('.sidebar-row')) container.append(empty('当前列表没有匹配项。'));
   }
 }
 function renderTree(container: HTMLElement, entries: FolderEntry[], depth: number) {
@@ -182,7 +226,7 @@ function renderTree(container: HTMLElement, entries: FolderEntry[], depth: numbe
     if (!entry.directory) { const button = row(entry.name, () => void run(() => bridge.openFolderFile(entry.path)), entry.path, /\.txt$/i.test(entry.name) ? 'file' : 'markdown'); button.style.paddingLeft = `${18 + depth * 14}px`; container.append(button); }
     else {
       const details = document.createElement('details'); const summary = document.createElement('summary'); summary.innerHTML = icon('chevron-right').replace('class="replica-icon"', 'class="replica-icon tree-chevron"') + icon('folder'); summary.append(document.createTextNode(entry.name)); summary.style.paddingLeft = `${18 + depth * 14}px`; const children = document.createElement('div'); details.append(summary, children);
-      details.addEventListener('toggle', () => { if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => renderTree(children, entries, depth + 1)).catch(error => toast(error.message)); }); container.append(details);
+      details.addEventListener('toggle', () => { if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path); if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => { if (children.isConnected) renderTree(children, entries, depth + 1); }).catch(error => toast(error.message)); }); details.open = expandedFolders.has(entry.path); container.append(details);
     }
   }
 }
@@ -211,15 +255,33 @@ function hideMenu() { $('#menu').hidden = true; openedMenu = -1; for (const butt
 function preferences() {
   const p = workspace.preferences; $<HTMLSelectElement>('#theme-select').value = p.theme; $<HTMLInputElement>('#font-size').value = String(p.fontSize);
   $<HTMLSelectElement>('#code-theme-select').value = p.codeTheme ?? 'modern-dark';
+  const width = p.readingWidth ?? 880; $<HTMLSelectElement>('#reading-width-select').value = String([720, 880, 1080].reduce((closest, value) => Math.abs(value - width) < Math.abs(closest - width) ? value : closest)); $<HTMLInputElement>('#code-wrap-toggle').checked = !!p.codeWrap;
   for (const [id, value] of [['format-save-toggle', p.formatOnSave], ['autosave-toggle', p.autoSave], ['tabs-toggle', p.tabs !== false], ['focus-toggle', p.focus], ['typewriter-toggle', p.typewriter]] as const) $<HTMLInputElement>(`#${id}`).checked = !!value;
   $<HTMLDialogElement>('#preferences').showModal();
 }
 function quickOpen() { $<HTMLDialogElement>('#quick-open').showModal(); $<HTMLInputElement>('#quick-input').value = ''; renderQuick(); $<HTMLInputElement>('#quick-input').focus(); }
+function paintQuickSelection() {
+  const results = [...$('#quick-results').querySelectorAll<HTMLButtonElement>('button')];
+  for (const [index, button] of results.entries()) { const active = index === quickSelection; button.classList.toggle('selected', active); button.setAttribute('aria-selected', String(active)); }
+  const selected = results[quickSelection];
+  if (selected) { $('#quick-input').setAttribute('aria-activedescendant', selected.id); selected.scrollIntoView({ block: 'nearest' }); }
+  else $('#quick-input').removeAttribute('aria-activedescendant');
+}
 function renderQuick() {
-  const value = $<HTMLInputElement>('#quick-input').value.toLowerCase(); const results = $('#quick-results'); results.replaceChildren(); const close = () => $<HTMLDialogElement>('#quick-open').close();
-  for (const doc of workspace.documents.filter(doc => doc.title.toLowerCase().includes(value))) results.append(row(doc.title, () => { close(); void run(() => bridge.activateDocument(doc.id)); }));
-  for (const file of workspace.recent.filter(file => nameOf(file).toLowerCase().includes(value))) results.append(row(nameOf(file), () => { close(); void run(() => bridge.openRecent(file)); }, file));
-  for (const file of folder?.entries.filter(file => !file.directory && file.name.toLowerCase().includes(value)) ?? []) results.append(row(file.name, () => { close(); void run(() => bridge.openFolderFile(file.path)); }, file.path));
+  const terms = $<HTMLInputElement>('#quick-input').value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const results = $('#quick-results'); results.replaceChildren(); quickSelection = 0; const seen = new Set<string>();
+  const add = (title: string, file: string | null, key: string, category: string, open: () => Promise<ActionResult>) => {
+    if (seen.has(key) || !terms.every(term => (title + ' ' + (file ?? '')).toLocaleLowerCase().includes(term)) || results.childElementCount >= 40) return;
+    seen.add(key); const button = document.createElement('button'); button.className = 'quick-result'; button.id = 'quick-result-' + results.childElementCount; button.setAttribute('role', 'option'); button.title = file ?? '本机草稿';
+    button.innerHTML = icon('markdown'); const label = document.createElement('span'); label.className = 'quick-result-label'; const name = document.createElement('strong'); name.textContent = title; const detail = document.createElement('small'); detail.textContent = file ?? '未命名草稿 · 仅保存在本机'; label.append(name, detail); const badge = document.createElement('span'); badge.className = 'quick-category'; badge.textContent = category; button.append(label, badge);
+    button.onclick = () => { $<HTMLDialogElement>('#quick-open').close(); void run(async () => { const result = await open(); activeEditor()?.focus(); return result; }); }; results.append(button);
+  };
+  const key = (file: string) => file.replaceAll('\\', '/').toLocaleLowerCase();
+  for (const doc of workspace.documents) add(doc.title, doc.path, doc.path ? key(doc.path) : doc.id, '已打开', () => bridge.activateDocument(doc.id));
+  for (const file of workspace.recent) add(nameOf(file), file, key(file), '最近', () => bridge.openRecent(file));
+  for (const file of folder?.entries ?? []) if (!file.directory) add(file.name, file.path, key(file.path), '文件夹', () => bridge.openFolderFile(file.path));
+  if (!results.childElementCount) { const hint = document.createElement('p'); hint.className = 'quick-empty'; hint.textContent = terms.length ? '没有找到匹配的文件，试试标题中的另一个词。' : '打开过的文件和当前文件夹会出现在这里。'; results.append(hint); }
+  paintQuickSelection();
 }
 function formatCell(action: string) {
   const cell = document.activeElement?.closest<HTMLElement>('th[contenteditable=true],td[contenteditable=true]'); if (!cell) return false;
@@ -352,12 +414,40 @@ $('#editor-stage').addEventListener('contextmenu', event => {
   menu.style.left = `${Math.min(event.clientX, innerWidth - 290)}px`; menu.style.top = `${Math.min(event.clientY, innerHeight - items.length * 29 - 12)}px`; menu.hidden = false;
 });
 for (const button of document.querySelectorAll<HTMLElement>('[data-control]')) button.onclick = () => bridge.windowControl(button.dataset.control as 'minimize' | 'maximize' | 'close');
-for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) button.onclick = () => { library = button.dataset.library!; renderSidebar(); };
+for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) button.onclick = () => { library = button.dataset.library!; $<HTMLInputElement>('#sidebar-filter').value = ''; renderSidebar(); };
 $('#add-tab').onclick = $('#new-empty').onclick = () => void execute('new'); $('#open-empty').onclick = () => void execute('open');
 $('#toggle-sidebar').onclick = $('#sidebar-close').onclick = () => void execute('sidebar'); $('#source-mode').onclick = () => void execute('toggle-source'); $('#open-folder').onclick = () => void execute('folder');
-$('#preferences-apply').onclick = () => void run(() => bridge.updatePreferences({ theme: $<HTMLSelectElement>('#theme-select').value as WorkspaceView['preferences']['theme'], codeTheme: $<HTMLSelectElement>('#code-theme-select').value as 'modern-dark' | 'vscode', fontSize: Number($<HTMLInputElement>('#font-size').value), autoSave: $<HTMLInputElement>('#autosave-toggle').checked, formatOnSave: $<HTMLInputElement>('#format-save-toggle').checked, tabs: $<HTMLInputElement>('#tabs-toggle').checked, focus: $<HTMLInputElement>('#focus-toggle').checked, typewriter: $<HTMLInputElement>('#typewriter-toggle').checked }));
-$('#quick-input').oninput = renderQuick; $('#quick-input').onkeydown = event => { if (event.key === 'Enter') $('#quick-results button')?.click(); }; $('#quick-close').onclick = () => $<HTMLDialogElement>('#quick-open').close(); $('#about-close').onclick = () => $<HTMLDialogElement>('#about').close();
+$('#preferences-apply').onclick = () => void run(() => bridge.updatePreferences({ theme: $<HTMLSelectElement>('#theme-select').value as WorkspaceView['preferences']['theme'], codeTheme: $<HTMLSelectElement>('#code-theme-select').value as 'modern-dark' | 'vscode', fontSize: Number($<HTMLInputElement>('#font-size').value), readingWidth: Number($<HTMLSelectElement>('#reading-width-select').value), codeWrap: $<HTMLInputElement>('#code-wrap-toggle').checked, autoSave: $<HTMLInputElement>('#autosave-toggle').checked, formatOnSave: $<HTMLInputElement>('#format-save-toggle').checked, tabs: $<HTMLInputElement>('#tabs-toggle').checked, focus: $<HTMLInputElement>('#focus-toggle').checked, typewriter: $<HTMLInputElement>('#typewriter-toggle').checked }));
+$('#quick-input').oninput = renderQuick; $('#quick-input').onkeydown = event => {
+  if (event.isComposing || event.keyCode === 229) return;
+  const count = $('#quick-results').querySelectorAll('button').length;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (count) { quickSelection = (quickSelection + (event.key === 'ArrowDown' ? 1 : -1) + count) % count; paintQuickSelection(); } }
+  else if (event.key === 'Enter') { event.preventDefault(); $('#quick-results').querySelectorAll<HTMLButtonElement>('button')[quickSelection]?.click(); }
+}; $('#quick-close').onclick = () => $<HTMLDialogElement>('#quick-open').close(); $('#about-close').onclick = () => $<HTMLDialogElement>('#about').close();
 $('#word-count').onclick = () => { const stats = currentStatistics(); toast(`${stats.words} 字 · ${stats.characters} 个正文字符 · ${stats.lines} 行（不计图片和链接目标地址）`); };
+$('#reading-width').onclick = () => {
+  const widths = [720, 880, 1080]; const current = workspace.preferences.readingWidth ?? 880;
+  const next = widths.find(width => width > current) ?? widths[0]; void run(() => bridge.updatePreferences({ readingWidth: next }));
+};
+$('#sidebar-filter').oninput = renderSidebar;
+$('#sidebar-filter').onkeydown = event => { if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); $<HTMLInputElement>('#sidebar-filter').value = ''; renderSidebar(); activeEditor()?.focus(); } };
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-command]')) { button.onmousedown = event => event.preventDefault(); button.onclick = () => void execute(button.dataset.command!); }
+const sidebarResize = $('#sidebar-resize');
+sidebarResize.onpointerdown = event => {
+  if (event.button !== 0) return; event.preventDefault(); resizingSidebar = true;
+  const start = event.clientX; const width = $('#sidebar').getBoundingClientRect().width; sidebarResize.setPointerCapture(event.pointerId); app.classList.add('resizing-sidebar');
+  let next = width;
+  const move = (event: PointerEvent) => { next = Math.round(Math.max(200, Math.min(420, innerWidth - 360, width + event.clientX - start))); document.documentElement.style.setProperty('--sidebar-width', `${next}px`); sidebarResize.setAttribute('aria-valuenow', String(next)); };
+  const finish = () => { sidebarResize.onpointermove = null; sidebarResize.onpointerup = null; sidebarResize.onpointercancel = null; resizingSidebar = false; app.classList.remove('resizing-sidebar'); void run(() => bridge.updatePreferences({ sidebarWidth: next })); };
+  sidebarResize.onpointermove = move; sidebarResize.onpointerup = finish; sidebarResize.onpointercancel = finish;
+};
+sidebarResize.onkeydown = event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault();
+  const width = workspace.preferences.sidebarWidth ?? 256; const next = event.key === 'Home' ? 200 : event.key === 'End' ? 420 : width + (event.key === 'ArrowRight' ? 10 : -10);
+  void run(() => bridge.updatePreferences({ sidebarWidth: next }));
+};
+sidebarResize.ondblclick = () => void run(() => bridge.updatePreferences({ sidebarWidth: 256 }));
+$('#quick-open').addEventListener('close', () => requestAnimationFrame(() => { if (!document.querySelector('dialog[open]')) activeEditor()?.focus(); }));
 bridge.onState(applyState); bridge.onCommand(command => void execute(command)); bridge.onMessage(toast); bridge.onPrepareClose(async token => { await Promise.allSettled([...pendingImages]); flushAll(); bridge.finishClose(token); });
 void bridge.bootstrap().then(state => { applyState(state); if (state.recovered) toast('上次的文档和草稿已恢复。'); }).catch(error => toast(`无法读取工作区：${error.message}`));
 // Desktop acceptance tests use the public editor state; this does not expose filesystem access.

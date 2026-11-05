@@ -21,6 +21,68 @@ async function content(page: Page) { return page.evaluate(() => (window as any).
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
+test('长代码默认横向滚动，折行保留续行缩进，切换不改原文和撤销并在重启后恢复', async () => {
+  let app = await launch(); const code = 'void build(int n) {\n    for (int i = 1; i <= n; ++i) dfn[i] = scc[i] = szc[i] = in[i] = vis[i] = 0, graph[i].clear(), reverse_graph[i].clear();\n}'; const raw = `# 算法笔记\n\n\`\`\`cpp\n${code}\n\`\`\`\n\n结尾`;
+  try {
+    const native = await app.application.browserWindow(app.page); await native.evaluate(window => { window.setBounds({ width: 920, height: 760 }); window.showInactive(); });
+    await setContent(app.page, raw); const block = current(app.page).locator('.md-code'); const scroller = block.locator('.cm-scroller'); const wrap = block.getByRole('button', { name: '代码自动换行', exact: true });
+    await expect(wrap).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => scroller.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(100);
+    expect(await app.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const longLine = block.locator('.cm-line').filter({ hasText: 'for (int i = 1;' }); const flatHeight = (await longLine.boundingBox())!.height;
+    await wrap.click(); await expect(wrap).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(async () => (await longLine.boundingBox())!.height).toBeGreaterThan(flatHeight * 1.5);
+    expect(await longLine.evaluate(element => parseFloat(getComputedStyle(element).textIndent))).toBeLessThan(0); expect(await content(app.page)).toBe(raw);
+    await block.locator('.cm-content').click(); await app.page.keyboard.press('Alt+z'); await expect(wrap).toHaveAttribute('aria-pressed', 'false');
+    await app.page.keyboard.press('Control+End'); await app.page.keyboard.insertText('\n// 新内容');
+    await wrap.click(); await app.page.keyboard.press('Control+z'); await expect.poll(() => content(app.page)).toBe(raw);
+    await execute(app.page, 'new'); await execute(app.page, 'previous-tab'); await block.locator('.cm-content').focus();
+    const tabs = app.page.locator('.tab'); await tabs.last().dragTo(tabs.first(), { targetPosition: { x: 4, y: 18 } });
+    await expect(block.locator('.cm-content')).toBeFocused(); await app.page.keyboard.press('Control+End'); await app.page.keyboard.insertText('\n// 拖动后仍在代码里');
+    await expect.poll(() => content(app.page)).toContain('// 拖动后仍在代码里\n```'); await app.page.keyboard.press('Control+z'); await expect.poll(() => content(app.page)).toBe(raw);
+    await app.application.evaluate(({ clipboard }) => { clipboard.writeText = async (value: string) => { (globalThis as any).__copied = value; }; });
+    await block.getByRole('button', { name: '复制代码', exact: true }).click(); expect(await app.application.evaluate(() => (globalThis as any).__copied)).toBe(code);
+    await expect.poll(() => fs.readFile(path.join(app.profile, 'recovery/workspace.json'), 'utf8').then(JSON.parse).then(data => data.preferences.codeWrap)).toBe(true);
+    const profile = app.profile; await app.application.close(); app = await launch(profile); expect(await content(app.page)).toBe(raw);
+    await expect(current(app.page).getByRole('button', { name: '代码自动换行', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  } finally { await app.application.close(); }
+});
+
+test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保留，显示操作不改正文', async () => {
+  let app = await launch(); const raw = '# 总览\n\n## 网络通信\n\n正文\n\n## 进程调度\n\n结尾';
+  try {
+    const native = await app.application.browserWindow(app.page); await native.evaluate(window => { window.setBounds({ width: 1200, height: 850 }); window.showInactive(); });
+    await setContent(app.page, raw); await execute(app.page, 'outline');
+    await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(3); await app.page.getByRole('searchbox', { name: '筛选侧栏' }).fill('网络');
+    await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(1); await expect(app.page.locator('#sidebar-content')).toContainText('网络通信');
+    await app.page.getByRole('searchbox', { name: '筛选侧栏' }).press('Escape'); await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(3);
+    const separator = app.page.getByRole('separator', { name: '调整侧栏宽度' }); const box = (await separator.boundingBox())!;
+    await app.page.mouse.move(box.x + box.width / 2, box.y + 90); await app.page.mouse.down(); await app.page.mouse.move(box.x + box.width / 2 + 54, box.y + 90, { steps: 8 }); await app.page.mouse.up();
+    await expect(separator).toHaveAttribute('aria-valuenow', '310'); await separator.focus(); await app.page.keyboard.press('ArrowRight'); await expect(separator).toHaveAttribute('aria-valuenow', '320');
+    await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click(); await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click();
+    await expect(app.page.locator('#reading-width')).toContainText('紧凑'); await execute(app.page, 'preferences'); await expect(app.page.locator('#reading-width-select')).toHaveValue('720'); await app.page.locator('#preferences button[value="cancel"]').click();
+    expect(await content(app.page)).toBe(raw); const profile = app.profile; await app.application.close(); app = await launch(profile);
+    await expect(app.page.getByRole('separator', { name: '调整侧栏宽度' })).toHaveAttribute('aria-valuenow', '320'); await expect(app.page.locator('#reading-width')).toContainText('紧凑'); expect(await content(app.page)).toBe(raw);
+  } finally { await app.application.close(); }
+});
+
+test('快速打开去重并支持方向键选择和路径搜索，中文组合输入回车不误打开', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    for (const name of ['01-算法.md', '02-系统.md']) {
+      const file = path.join(directory, name); await fs.writeFile(file, '# ' + name);
+      await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, file); await execute(page, 'open');
+    }
+    await execute(page, 'previous-tab'); await page.keyboard.press('Control+p'); await expect(page.locator('#quick-results button')).toHaveCount(2);
+    await expect(page.locator('#quick-results button').first()).toHaveAttribute('aria-selected', 'true'); await page.keyboard.press('ArrowDown'); await expect(page.locator('#quick-results button').last()).toHaveAttribute('aria-selected', 'true'); await page.keyboard.press('Enter');
+    await expect(page.locator('#quick-open')).not.toBeVisible(); await expect(page.locator('#caption')).toContainText('02-系统.md');
+    await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('01-算法'); await expect(page.locator('#quick-results button')).toHaveCount(1);
+    await page.locator('#quick-input').evaluate(input => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))); await expect(page.locator('#quick-open')).toBeVisible();
+    await page.keyboard.press('Enter'); await expect(page.locator('#caption')).toContainText('01-算法.md');
+    await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('不会存在的标题'); await expect(page.locator('.quick-empty')).toContainText('没有找到'); await page.keyboard.press('Escape'); await expect(page.locator('#quick-open')).not.toBeVisible();
+  } finally { await application.close(); }
+});
+
 test('原文保真、光标语法显隐、排版和真实快捷键', async () => {
   const { application, page } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
@@ -276,7 +338,7 @@ test('Copilot 主题可从菜单和偏好设置选择，重启后仍保留', asy
     const raw = '## 标题\n\n> **引用块**\n\n```\n应用层 HTTP\n传输层 TCP\n```\n'; await setContent(currentApp.page, raw);
     await currentApp.page.getByRole('button', { name: '主题', exact: true }).click(); await currentApp.page.getByRole('menuitem', { name: 'Copilot 深色' }).click();
     await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'copilot');
-    await expect(current(currentApp.page).locator('.md-quote')).toHaveCSS('background-color', 'rgb(43, 43, 43)');
+    await expect(current(currentApp.page).locator('.md-quote')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await execute(currentApp.page, 'preferences'); await expect(currentApp.page.locator('#theme-select')).toHaveValue('copilot'); await currentApp.page.getByRole('button', { name: '应用', exact: true }).click();
     expect(await content(currentApp.page)).toBe(raw);
     await currentApp.application.close(); currentApp = await launch(currentApp.profile); await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'copilot'); expect(await content(currentApp.page)).toBe(raw);

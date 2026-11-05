@@ -53,7 +53,7 @@ export class DocumentStore {
   readonly windows = new Map<string, WindowRecord>();
   readonly images: ImageAttachments;
   recent: string[] = [];
-  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'light', fontSize: 16, sidebar: false, tabs: true, focus: false, typewriter: false, codeTheme: 'modern-dark' };
+  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'light', fontSize: 16, sidebar: false, tabs: true, focus: false, typewriter: false, codeTheme: 'modern-dark', codeWrap: false, readingWidth: 880, sidebarWidth: 256 };
   recovered = false;
   onChanged: () => void = () => {};
   onError: (message: string) => void = () => {};
@@ -228,6 +228,10 @@ export class DocumentStore {
   setPreferences(preferences: Partial<WorkspaceView['preferences']>) {
     if (typeof preferences.autoSave === 'boolean') this.preferences.autoSave = preferences.autoSave;
     if (typeof preferences.formatOnSave === 'boolean') this.preferences.formatOnSave = preferences.formatOnSave;
+    if (typeof preferences.codeWrap === 'boolean') this.preferences.codeWrap = preferences.codeWrap;
+    for (const [key, minimum, maximum] of [['readingWidth', 640, 1200], ['sidebarWidth', 200, 420]] as const) {
+      const value = preferences[key]; if (typeof value === 'number' && Number.isFinite(value)) this.preferences[key] = Math.round(Math.max(minimum, Math.min(maximum, value)));
+    }
     if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot') this.preferences.theme = preferences.theme;
     if (preferences.codeTheme === 'modern-dark' || preferences.codeTheme === 'vscode') this.preferences.codeTheme = preferences.codeTheme;
     if (typeof preferences.fontSize === 'number' && Number.isFinite(preferences.fontSize)) this.preferences.fontSize = Math.max(14, Math.min(24, preferences.fontSize));

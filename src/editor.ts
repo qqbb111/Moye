@@ -23,7 +23,19 @@ function completeEmoji(context: CompletionContext) {
   return { from: match.from, options: Object.entries(emoji).map(([name, value]) => ({ label: `:${name}:`, detail: value, apply: `:${name}:`, type: 'text' })), validFor: /^:[a-z_0-9+-]*$/ };
 }
 export const sourceField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(sourceEffect)) value = effect.value; return value; } });
-type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void };
+type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void };
+
+// Continuation lines keep a little more indent than the original code line.
+const hangingCodeIndent = EditorView.decorations.compute(['doc'], state => {
+  const ranges = [];
+  for (let number = 1; number <= state.doc.lines; number++) {
+    const row = state.doc.line(number); let columns = 0;
+    for (const character of /^\s*/.exec(row.text)![0]) columns += character === '\t' ? state.tabSize - columns % state.tabSize : 1;
+    const indent = Math.min(columns + 2, 40);
+    ranges.push(Decoration.line({ attributes: { style: `padding-left:${indent}ch!important;text-indent:-${indent}ch` } }).range(row.from));
+  }
+  return Decoration.set(ranges);
+});
 type Context = { node: MarkdownNode; from: number; to: number; source: string; host: Host; signature?: string };
 const widgetEditors = new WeakMap<HTMLElement, EditorView>();
 function focusEmbedded(view: EditorView, position: number) {
@@ -114,9 +126,17 @@ class BlockWidget extends WidgetType {
     const ctx = this.context; const toolbar = document.createElement('div'); toolbar.className = 'code-toolbar';
     const language = document.createElement('input'); language.value = ctx.node.lang ?? ''; language.placeholder = '选择语言'; language.setAttribute('aria-label', '代码语言');
     const copy = document.createElement('button'); copy.className = 'code-copy'; copy.innerHTML = copyIcon; copy.title = '复制代码'; copy.setAttribute('aria-label', '复制代码'); let copyTimer: ReturnType<typeof setTimeout>;
+    const wrap = document.createElement('button'); wrap.className = 'code-wrap'; wrap.innerHTML = icon('word-wrap'); wrap.title = '代码自动换行 Alt+Z'; wrap.setAttribute('aria-label', '代码自动换行'); wrap.onmousedown = event => event.preventDefault();
+    const count = document.createElement('span'); count.className = 'code-lines';
+    const wrapConfig = new Compartment(); let wrapping = !!ctx.host.codeWrap?.();
+    const wrapExtensions = (enabled: boolean) => enabled ? [EditorView.lineWrapping, hangingCodeIndent] : [];
+    const paintWrap = () => { wrap.setAttribute('aria-pressed', String(wrapping)); root.dataset.wrapping = String(wrapping); };
+    const setWrap = (enabled: boolean) => { if (wrapping === enabled) return; wrapping = enabled; code.dispatch({ effects: wrapConfig.reconfigure(wrapExtensions(enabled)) }); paintWrap(); };
+    const toggleWrap = () => { setWrap(!wrapping); ctx.host.setCodeWrap?.(wrapping); return true; }; wrap.onclick = toggleWrap; paintWrap();
+    const updateCount = (state: EditorState) => { count.textContent = `${state.doc.lines} 行`; };
     copy.onmousedown = event => event.preventDefault();
     copy.onclick = () => { const editor = widgetEditors.get(root); void window.rypota.clipboard('write', editor?.state.doc.toString() ?? '').then(() => { clearTimeout(copyTimer); copy.innerHTML = checkIcon; copy.dataset.copied = 'true'; copy.title = '已复制'; copy.setAttribute('aria-label', '已复制'); copyTimer = setTimeout(() => { copy.innerHTML = copyIcon; delete copy.dataset.copied; copy.title = '复制代码'; copy.setAttribute('aria-label', '复制代码'); }, 1500); }).catch(() => { copy.title = '复制失败，请重试'; }); };
-    toolbar.append(language, copy); const content = document.createElement('div'); content.className = 'code-content'; root.append(toolbar, content);
+    toolbar.append(language, count, wrap, copy); const content = document.createElement('div'); content.className = 'code-content'; root.append(toolbar, content);
     let applying = false;
     const commit = (value: string) => {
       if (applying) return; const current: Context = (root as any).context;
@@ -126,8 +146,9 @@ class BlockWidget extends WidgetType {
       outer.dispatch({ changes: { from: current.from, to: current.to, insert: replacement } });
     };
     const languageConfig = new Compartment();
-    const extensions: Extension[] = [history(), drawSelection(), syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), bracketMatching(), keymap.of([{ key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.lineWrapping, EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区' }), EditorView.updateListener.of(update => { if (update.docChanged) commit(update.state.doc.toString()); })];
+    const extensions: Extension[] = [history(), drawSelection(), syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Alt-z', run: toggleWrap }, { key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); commit(update.state.doc.toString()); } })];
     const code = new EditorView({ state: EditorState.create({ doc: ctx.node.value ?? '', extensions }), parent: content }); widgetEditors.set(root, code);
+    (root as any).setCodeWrap = setWrap; updateCount(code.state);
     if ((ctx.node.lang ?? '').toLowerCase() === 'mermaid') {
       root.classList.add('md-diagram'); const preview = document.createElement('div'); preview.className = 'diagram-preview'; root.prepend(preview); let sequence = 0; let timer: ReturnType<typeof setTimeout>;
       const draw = (value: string) => { const revision = ++sequence; clearTimeout(timer); timer = setTimeout(() => { void import('mermaid').then(async ({ default: mermaid }) => {
@@ -419,6 +440,7 @@ export class MarkdownEditor {
   }
   get content() { return this.view.state.doc.toString(); }
   get source() { return this.view.state.field(sourceField); }
+  setCodeWrap(enabled: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeWrap?.(enabled); }
   setSource(source: boolean) { this.view.dispatch({ effects: sourceEffect.of(source) }); this.view.dom.dataset.source = String(source); this.view.focus(); }
   replace(content: string) { if (this.view.compositionStarted && this.view.state.field(quoteCompositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }
   insertImage(url: string, alt = '图片') { const label = alt.replace(/[\[\]\\\r\n]/g, ' '); const markdown = `![${label}](${url})`; insertBlock(this.view, markdown, markdown.length + 2); }

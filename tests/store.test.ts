@@ -7,6 +7,20 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DocumentStore, FileConflictError } from '../electron/store';
 async function setup() { const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rypota-store-')); const store = new DocumentStore(path.join(directory, 'recovery'), { autoSave: 35, recovery: 10 }); await store.initialize(); const windowId = store.newWindow(); return { directory, store, windowId }; }
 
+test('阅读宽度、侧栏宽度和代码折行校验范围，恢复时保留草稿和显示偏好', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '显示偏好不能影响草稿');
+    store.setPreferences({ readingWidth: Infinity, sidebarWidth: NaN });
+    assert.equal(store.preferences.readingWidth, 880); assert.equal(store.preferences.sidebarWidth, 256);
+    store.setPreferences({ readingWidth: 50000, sidebarWidth: 0, codeWrap: true });
+    assert.equal(store.preferences.readingWidth, 1200); assert.equal(store.preferences.sidebarWidth, 200);
+    store.setPreferences({ readingWidth: 720, sidebarWidth: 310 }); await store.flush();
+    const restored = new DocumentStore(store.directory); await restored.initialize();
+    try { assert.equal(restored.preferences.readingWidth, 720); assert.equal(restored.preferences.sidebarWidth, 310); assert.equal(restored.preferences.codeWrap, true); assert.equal(restored.view(windowId).documents.find(doc => doc.id === id)?.content, '显示偏好不能影响草稿'); } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
+
 test('拖动排序只接受当前窗口的完整标签集合，并持久化顺序和活动文档', async () => {
   const { store, windowId } = await setup();
   try {
