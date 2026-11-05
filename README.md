@@ -16,7 +16,7 @@
 
 菜单选择 **主题 → Copilot 深色**，也可以在偏好设置里选择。主题会随工作区保存，下次打开继续使用。
 
-这个主题根据截图和本机 VS Code Dark Modern 的聊天样式制作：深灰背景、浅灰正文、灰底引用块、较紧凑的标题和带边框的代码块。正文采用 Segoe UI／微软雅黑，代码采用用户提供的 `'Fira Code', '霞鹜文楷', 'JetBrains Mono', Consolas, 'Courier New', monospace`，开启字体连字。字体从本机读取；其他电脑未安装时按顺序回退。
+这个主题根据截图和本机 VS Code Dark Modern 的聊天样式制作：深灰背景、浅灰正文、灰底引用块、较紧凑的标题和带边框的代码块。正文中文采用霞鹜文楷，英文沿用 Segoe UI，代码采用用户提供的 `'Fira Code', '霞鹜文楷', 'JetBrains Mono', Consolas, 'Courier New', monospace`，开启字体连字。字体从本机读取；其他电脑未安装时按顺序回退。
 
 打开 [Copilot 排版示例](docs/Copilot排版示例.md) 可以与参考截图对照。独立主题样式位于 `src/themes/copilot.css`。
 

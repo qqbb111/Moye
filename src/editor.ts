@@ -131,7 +131,7 @@ class BlockWidget extends WidgetType {
     if ((ctx.node.lang ?? '').toLowerCase() === 'mermaid') {
       root.classList.add('md-diagram'); const preview = document.createElement('div'); preview.className = 'diagram-preview'; root.prepend(preview); let sequence = 0; let timer: ReturnType<typeof setTimeout>;
       const draw = (value: string) => { const revision = ++sequence; clearTimeout(timer); timer = setTimeout(() => { void import('mermaid').then(async ({ default: mermaid }) => {
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, flowchart: { htmlLabels: false }, fontFamily: 'Open Sans, Microsoft YaHei UI, sans-serif' });
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, flowchart: { htmlLabels: false }, fontFamily: 'Open Sans, 霞鹜文楷, LXGW WenKai, Microsoft YaHei UI, sans-serif' });
         try { const result = await mermaid.render(`diagram-${crypto.randomUUID()}`, value); if (revision === sequence && root.isConnected) preview.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } }); }
         catch { if (revision === sequence) preview.textContent = '图表语法尚未完成，继续编辑代码即可。'; }
       }).catch(() => { preview.textContent = '图表暂时无法加载。'; }); }, 180); };
