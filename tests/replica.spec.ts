@@ -21,6 +21,42 @@ async function content(page: Page) { return page.evaluate(() => (window as any).
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
+test('墨页名称、紧凑标题栏和文件切换入口在窄窗口也可用', async () => {
+  const { application, page } = await launch();
+  try {
+    expect(await application.evaluate(({ app }) => app.getName())).toBe('墨页 Moye');
+    await expect(page).toHaveTitle(/墨页 Moye$/); await expect(page.locator('.brand-name')).toContainText('墨页');
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 640, height: 650 }); window.showInactive(); });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const menu = page.getByRole('navigation', { name: '应用菜单' }); await menu.getByRole('button', { name: '文件', exact: true }).click(); await expect(page.locator('#menu')).toBeVisible(); await page.keyboard.press('Escape');
+    await page.locator('#document-switch').click(); await expect(page.locator('#quick-open')).toBeVisible(); await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '新建文档', exact: true }).click(); await expect(page.locator('.tab')).toHaveCount(2);
+    await setContent(page, '# 新界面保留原文\n\n正文'); await execute(page, 'focus'); await expect(page.locator('.document-heading')).toBeHidden();
+    await execute(page, 'focus'); await expect(page.locator('.document-heading')).toBeVisible(); expect(await content(page)).toBe('# 新界面保留原文\n\n正文');
+  } finally { await application.close(); }
+});
+
+test('Windows 快捷方式补齐稳定应用标识，保护其他应用和文档专属入口', async () => {
+  test.skip(process.platform !== 'win32'); const { application, directory, profile } = await launch();
+  try {
+    const pin = path.join(directory, 'Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar'); await fs.mkdir(pin, { recursive: true });
+    const links = { legacy: path.join(pin, '旧入口.lnk'), other: path.join(pin, '其他应用.lnk'), document: path.join(pin, '某份文档.lnk'), start: path.join(directory, 'Microsoft/Windows/Start Menu/Programs/墨页 Moye.lnk'), otherExe: path.join(directory, 'other.exe') };
+    await application.evaluate(({ shell }, links) => {
+      shell.writeShortcutLink(links.legacy, { target: process.execPath, args: '--new-window', description: '旧名称' });
+      shell.writeShortcutLink(links.other, { target: links.otherExe, appUserModelId: 'Other.App' });
+      shell.writeShortcutLink(links.document, { target: process.execPath, args: 'document.md', appUserModelId: 'Document.App' });
+    }, links);
+    const beforeOther = await fs.readFile(links.other), beforeDocument = await fs.readFile(links.document);
+    const result = await application.evaluate(async ({ app, shell }, { directory, links }) => {
+      const api = (globalThis as any).__replicaTest;
+      const outcome = await api.repairWindowsShortcuts(shell, process.execPath, directory, api.appIconPath);
+      return { ...outcome, legacy: shell.readShortcutLink(links.legacy), start: shell.readShortcutLink(links.start), appId: api.appId, userData: app.getPath('userData') };
+    }, { directory, links });
+    expect(result.failed).toEqual([]); expect(result.updated).toHaveLength(2); expect(result.legacy.appUserModelId).toBe('HanHan.TyporaReplica'); expect(result.start.appUserModelId).toBe(result.appId);
+    expect(result.legacy.description).toBe('墨页 Moye'); expect(result.legacy.args).toBe('--new-window'); expect(result.legacy.icon).toBe(result.start.icon); expect(beforeOther.equals(await fs.readFile(links.other))).toBe(true); expect(beforeDocument.equals(await fs.readFile(links.document))).toBe(true); expect(result.userData).toBe(profile);
+  } finally { await application.close(); }
+});
+
 test('WorkBuddy 排版、嵌入字体、行号槽与 Shiki github-dark 代表色实际生效', async () => {
   const { application, page, directory } = await launch();
   try {

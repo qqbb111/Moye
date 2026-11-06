@@ -5,9 +5,9 @@
 
 :root[data-theme='workbuddy'] {
   color-scheme: dark;
-  --bg: #1f1f1f; --fg: #e9e9e9; --muted: #ffffff80; --surface: #1b1b1b;
+  --bg: #1f1f1f; --fg: #e9e9e9; --muted: #ffffff80; --surface: #191c1b;
   --border: #ffffff1f; --hover: #ffffff0d; --link: #0088ff; --code: #c8c8c826;
-  --chrome: #1d1d1d; --accent-soft: #303030; --selection: #2383e247;
+  --chrome: #191c1b; --accent-soft: #303030; --selection: #2383e247;
   --prose-font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', '微软雅黑', Helvetica, Arial, 'Segoe UI', sans-serif;
   --wb-mono: 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Cascadia Mono', 'Courier New', monospace;
 }

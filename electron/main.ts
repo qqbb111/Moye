@@ -8,11 +8,15 @@ import { DocumentStore, FileConflictError, atomicWrite } from './store';
 import type { ActionResult, AppCommand } from '../shared/types';
 import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
+import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
+import { repairWindowsShortcuts } from './windows-integration';
 
-app.setName('Typora Replica');
-const appId = 'HanHan.TyporaReplica';
+app.setName(APP_NAME);
+const appId = APP_ID;
 if (process.platform === 'win32') app.setAppUserModelId(appId);
-if (process.env.TYPORA_REPLICA_USER_DATA) app.setPath('userData', path.resolve(process.env.TYPORA_REPLICA_USER_DATA));
+// A product rename must not move recovery data or split the single-instance lock.
+app.setPath('userData', process.env.TYPORA_REPLICA_USER_DATA ? path.resolve(process.env.TYPORA_REPLICA_USER_DATA) : path.join(app.getPath('appData'), LEGACY_DATA_DIRECTORY));
+const appIconPath = app.isPackaged ? path.join(path.dirname(process.execPath), 'moye.ico') : path.resolve(__dirname, '../assets/replica.ico');
 protocol.registerSchemesAsPrivileged([
   { scheme: 'replica', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   { scheme: 'replica-media', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -66,11 +70,11 @@ async function collectEdits(window: BrowserWindow) {
   });
 }
 function createWindow(id: string = store.newWindow()) {
-  const window = new BrowserWindow({ width: 1320, height: 880, minWidth: 640, minHeight: 420, frame: false, show: false, backgroundColor: '#ffffff', title: 'Typora Replica', icon: path.resolve(__dirname, '../assets/replica.ico'), autoHideMenuBar: true,
+  const window = new BrowserWindow({ width: 1320, height: 880, minWidth: 640, minHeight: 420, frame: false, show: false, backgroundColor: store.preferences.theme === 'light' ? '#fbfaf7' : '#1f1f1f', title: APP_NAME, icon: appIconPath, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: process.env.TYPORA_REPLICA_TEST !== '1' } });
   windows.set(id, window);
   window.on('maximize', publish); window.on('unmaximize', publish);
-  if (process.platform === 'win32') window.setAppDetails({ appId, appIconPath: app.isPackaged ? process.execPath : path.resolve(__dirname, '../assets/replica.ico'), appIconIndex: 0, relaunchCommand: relaunchCommand(), relaunchDisplayName: '新建 Replica 窗口' });
+  if (process.platform === 'win32') window.setAppDetails({ appId, appIconPath, appIconIndex: 0, relaunchCommand: relaunchCommand(), relaunchDisplayName: APP_NAME });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
@@ -252,6 +256,10 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', (_event, argv, cwd) => handleLaunch(argv, cwd));
   void app.whenReady().then(async () => {
+    if (process.platform === 'win32' && app.isPackaged && process.env.TYPORA_REPLICA_TEST !== '1') {
+      void repairWindowsShortcuts(shell, process.execPath, app.getPath('appData'), appIconPath).catch(error => console.error('Shortcut repair:', error));
+      app.setUserTasks([{ program: process.execPath, arguments: '--new-window', iconPath: appIconPath, iconIndex: 0, title: '新建窗口', description: '新建一个墨页窗口' }]);
+    }
     await store.initialize(); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
     await registerProtocols(); registerIpc(); installMenu();
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -259,10 +267,10 @@ else {
     if (!store.windows.size) { const id = store.newWindow(); store.newDocument(id); }
     for (const id of store.windows.keys()) createWindow(id);
     if (process.argv.includes('--new-window') && [...store.documents.values()].some(doc => doc.path || doc.content)) newBlankWindow();
-    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme };
+    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts };
     const target = process.argv.includes('--new-window') ? [...windows.keys()].at(-1)! : [...windows.keys()][0]; for (const file of initialFiles) await openFile(target, file).catch(error => notify(windows.get(target)!, error.message));
     launchReady = true; for (const request of queuedLaunches.splice(0)) handleLaunch(request.argv, request.cwd);
-  }).catch(error => { console.error(error); dialog.showErrorBox('Typora Replica 无法启动', error.message); app.exit(1); });
+  }).catch(error => { console.error(error); dialog.showErrorBox(`${APP_NAME} 无法启动`, error.message); app.exit(1); });
   app.on('before-quit', event => {
     if (quitting) return;
     event.preventDefault();

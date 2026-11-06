@@ -4,7 +4,13 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resedit } from '@electron/packager/resedit';
 await import('./notices.mjs');
+const productName = '墨页 Moye';
+const productVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+async function brandExecutable(executable) {
+  await resedit(executable, { productName, productVersion, fileVersion: productVersion, iconPath: path.resolve('assets/replica.ico'), legalCopyright: 'Moye contributors', win32Metadata: { FileDescription: productName, CompanyName: 'Moye', InternalName: 'Moye', OriginalFilename: 'Typora Replica.exe' } });
+}
 const electronVersion = JSON.parse(readFileSync('node_modules/electron/package.json', 'utf8')).version;
 const releaseRoot = path.resolve('release/Typora Replica-win32-x64');
 if (existsSync(path.join(releaseRoot, 'Typora Replica.exe'))) {
@@ -27,7 +33,13 @@ if (existsSync(path.join(releaseRoot, 'Typora Replica.exe'))) {
   const temporary = path.join(releaseRoot, 'resources', `app-${randomUUID()}.asar`);
   const { createPackage } = await import('@electron/asar');
   await createPackage(staging, temporary);
-  if (process.argv.includes('--prepare-only')) { console.log(JSON.stringify({ prepared: temporary, releaseRoot })); process.exit(0); }
+  const preparedExecutable = path.join(staging, 'Typora Replica.exe');
+  await fs.copyFile(path.join(releaseRoot, 'Typora Replica.exe'), preparedExecutable); await brandExecutable(preparedExecutable);
+  const preparedIcon = path.resolve('assets/replica.ico');
+  if (process.argv.includes('--prepare-only')) { console.log(JSON.stringify({ prepared: temporary, preparedExecutable, preparedIcon, releaseRoot })); process.exit(0); }
+  // A running EXE rejects this copy before the application archive is changed.
+  await fs.copyFile(preparedExecutable, path.join(releaseRoot, 'Typora Replica.exe'));
+  await fs.copyFile(preparedIcon, path.join(releaseRoot, 'moye.ico'));
   await fs.copyFile(target, path.join(releaseRoot, 'resources/app.previous.asar'));
   await fs.rename(temporary, target);
   await fs.copyFile('THIRD_PARTY_NOTICES.txt', path.join(releaseRoot, 'THIRD_PARTY_NOTICES.txt'));
@@ -38,4 +50,5 @@ const filename = `electron-v${electronVersion}-win32-x64.zip`;
 const checksum = JSON.parse(readFileSync('node_modules/electron/checksums.json', 'utf8'))[filename];
 const electronZipDir = ['node_modules/electron/mirror-cache', 'node_modules/electron'].find(directory => existsSync(`${directory}/${filename}`) && createHash('sha256').update(readFileSync(`${directory}/${filename}`)).digest('hex') === checksum);
 const paths = await packager({ dir: '.', out: 'release', name: 'Typora Replica', platform: 'win32', arch: 'x64', electronZipDir, asar: true, overwrite: false, executableName: 'Typora Replica', icon: 'assets/replica.ico', prune: false, ignore: [/^\/node_modules/, /^\/release/, /^\/test-results/, /^\/playwright-report/, /^\/\.test-data/, /^\/tests/, /^\/src/, /^\/electron/, /^\/scripts/, /^\/shared/, /^\/\.git/, /^\/playwright\.config/, /^\/tsconfig/], appCopyright: 'Typora Replica contributors', win32metadata: { ProductName: 'Typora Replica', FileDescription: 'Typora Replica Markdown 编辑器', CompanyName: 'Typora Replica', OriginalFilename: 'Typora Replica.exe' } });
+for (const directory of paths) { await brandExecutable(path.join(directory, 'Typora Replica.exe')); await fs.copyFile('assets/replica.ico', path.join(directory, 'moye.ico')); }
 console.log(paths.join('\n'));

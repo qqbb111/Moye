@@ -1,4 +1,4 @@
-Typora Replica third-party notices
+Moye third-party notices
 
 This inventory covers installed production dependencies; some packages may be removed by bundling. Electron and Chromium notices are included with the desktop runtime.
 
