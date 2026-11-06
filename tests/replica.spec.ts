@@ -431,16 +431,18 @@ test('拖动时整张标签跟随鼠标并保留抓取位置，使用柔和占�
     const first = page.locator(`.tab[data-id="${ids[0]}"]`); const original = (await first.boundingBox())!;
     const grab = { x: original.x + 35, y: original.y + 17 };
     await page.mouse.move(grab.x, grab.y); await page.mouse.down(); await page.mouse.move(grab.x + 70, grab.y + 3, { steps: 8 });
-    await expect(first).toHaveClass(/dragging/); await expect(first).toHaveCSS('opacity', '1');
-    const floating = (await first.boundingBox())!;
+    await expect(first).toHaveClass(/dragging/); await expect(first).toHaveCSS('opacity', '0');
+    const preview = page.locator('.tab-drag-preview'); await expect(preview).toHaveCSS('opacity', '1');
+    await expect.poll(async () => Math.abs((await preview.boundingBox())!.x - original.x - 70)).toBeLessThan(1);
+    const floating = (await preview.boundingBox())!;
     expect(Math.abs(floating.x - original.x - 70)).toBeLessThan(1); expect(Math.abs(floating.y - original.y - 3)).toBeLessThan(1); expect(Math.abs(floating.width - original.width)).toBeLessThan(1);
-    await expect(first.locator('.tab-file-icon')).toBeVisible(); await expect(first.locator('.tab-label')).toContainText('未命名 1'); await expect(first.locator('.tab-close')).toBeVisible();
+    await expect(preview.locator('.tab-file-icon')).toBeVisible(); await expect(preview.locator('.tab-label')).toContainText('未命名 1'); await expect(preview.locator('.tab-close')).toBeVisible();
     await expect(page.locator('.tab-placeholder')).toBeVisible(); await expect(page.locator('#tabbar')).toHaveCSS('box-shadow', 'none');
-    await page.mouse.move(grab.x + 150, grab.y + 5, { steps: 8 }); const moved = (await first.boundingBox())!;
+    await page.mouse.move(grab.x + 150, grab.y + 5, { steps: 8 }); await expect.poll(async () => Math.abs((await preview.boundingBox())!.x - floating.x - 80)).toBeLessThan(1); const moved = (await preview.boundingBox())!;
     expect(Math.abs(moved.x - floating.x - 80)).toBeLessThan(1); expect(Math.abs(moved.y - floating.y - 2)).toBeLessThan(1);
     const strip = (await page.locator('#tabs').boundingBox())!; await page.mouse.move(strip.x + strip.width - 40, strip.y + strip.height / 2, { steps: 15 }); await page.mouse.up();
     await expect.poll(() => page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id))).toEqual([ids[1], ids[2], ids[0]]);
-    await expect(page.locator('.tab-placeholder,.tab.dragging')).toHaveCount(0); expect(await content(page)).toBe('第三份'); await expect(page.locator('.tab.active')).toHaveAttribute('data-id', ids[2]);
+    await expect(page.locator('.tab-placeholder,.tab.dragging,.tab-drag-preview')).toHaveCount(0); expect(await content(page)).toBe('第三份'); await expect(page.locator('.tab.active')).toHaveAttribute('data-id', ids[2]);
   } finally { await page.mouse.up().catch(() => {}); await application.close(); }
 });
 
@@ -459,7 +461,7 @@ test('标签拖动可用 Esc 或丢失指针捕获取消，恢复布局并可继
         // Chromium delivers pending capture changes with the next pointer event.
         await page.mouse.move(box.x + 201, box.y + 18);
       }
-      await expect(page.locator('.tab-placeholder,.tab.dragging')).toHaveCount(0); await page.mouse.up();
+      await expect(page.locator('.tab-placeholder,.tab.dragging,.tab-drag-preview')).toHaveCount(0); await page.mouse.up();
       expect(await order()).toEqual(ids); expect(await content(page)).toBe('第三份'); await expect(first).not.toHaveCSS('position', 'fixed');
     }
     await page.locator('.tab').first().click(); expect(await content(page)).toBe('第一份');

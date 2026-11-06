@@ -27,7 +27,7 @@ app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NA
   <div id="menu" role="menu" hidden></div><div id="toast" role="status" hidden></div>
   <dialog id="preferences"><form method="dialog"><h2>偏好设置</h2><label>主题<select id="theme-select"><option value="workbuddy">WorkBuddy 深色</option><option value="light">白色</option><option value="dark">夜间</option><option value="copilot">Copilot 深色</option></select></label><div class="code-theme-setting"><label>代码配色<select id="code-theme-select"><option value="github-dark">GitHub Dark · Shiki</option><option value="modern-dark">现代深色</option><option value="vscode">跟随本机 VS Code</option></select></label><p id="code-theme-status"></p></div><label>正文字号<input id="font-size" type="number" min="14" max="24"></label><label>阅读宽度<select id="reading-width-select"><option value="720">紧凑 · 720</option><option value="900">适中 · 900</option><option value="1080">宽阔 · 1080</option></select></label><label><input id="code-wrap-toggle" type="checkbox">代码自动换行（代码块内 Alt+Z）</label><label><input id="format-save-toggle" type="checkbox">保存前整理中文排版（含自动保存）</label><p>默认关闭。开启后整理正文空格和常见标点，保留代码、公式和地址；可以撤销。</p><label><input id="autosave-toggle" type="checkbox">自动保存已打开的文件</label><p>未命名文档会保存为本地草稿，重新打开后恢复。</p><label><input id="tabs-toggle" type="checkbox">多个文档显示标签页</label><label><input id="focus-toggle" type="checkbox">专注模式</label><label><input id="typewriter-toggle" type="checkbox">打字机模式</label><div class="dialog-buttons"><button value="cancel">关闭</button><button id="preferences-apply" value="default">应用</button></div></form></dialog>
   <dialog id="quick-open"><h2>快速打开</h2><input id="quick-input" placeholder="搜索标题或路径…" aria-label="快速打开文件名" role="combobox" aria-controls="quick-results" aria-expanded="true" aria-autocomplete="list" autocomplete="off"><div id="quick-results" role="listbox" aria-label="文件搜索结果"></div><p class="quick-help"><kbd>↑ ↓</kbd> 选择 <kbd>Enter</kbd> 打开 <kbd>Esc</kbd> 返回写作</p><button id="quick-close">关闭</button></dialog>
-  <dialog id="about"><h2>${APP_NAME}</h2><p>一个保留 Markdown 原文的即时排版编辑器。</p><p>版本 0.5.1 · 安静写作，顺手记录</p><p>Ctrl+/ 源码 · Ctrl+S 保存 · Ctrl+Shift+N 新窗口</p><button id="about-close">关闭</button></dialog>`;
+  <dialog id="about"><h2>${APP_NAME}</h2><p>一个保留 Markdown 原文的即时排版编辑器。</p><p>版本 0.5.2 · 安静写作，顺手记录</p><p>Ctrl+/ 源码 · Ctrl+S 保存 · Ctrl+Shift+N 新窗口</p><button id="about-close">关闭</button></dialog>`;
 
 let workspace: WorkspaceView;
 let library = 'outline'; let folder: { path: string; entries: FolderEntry[] } | null = null;
@@ -91,20 +91,24 @@ function applyState(next: WorkspaceView) {
   render();
 }
 let dragX: number | null = null; let dragFrame = 0;
-let floatingTab: { element: HTMLElement; placeholder: HTMLElement; grabX: number; grabY: number } | null = null;
+let floatingTab: { element: HTMLElement; preview: HTMLElement; placeholder: HTMLElement; grabX: number; grabY: number } | null = null;
 let releaseTabPointer: (() => void) | null = null;
 let cancelTabPointer: (() => void) | null = null;
 function floatTab(tab: HTMLElement, x: number, y: number, originX = x, originY = y) {
   const box = tab.getBoundingClientRect();
+  const left = tab.offsetLeft, top = tab.offsetTop;
   const placeholder = document.createElement('div'); placeholder.className = 'tab-placeholder'; placeholder.setAttribute('aria-hidden', 'true');
-  placeholder.style.width = `${box.width}px`; placeholder.style.height = `${box.height}px`; tab.before(placeholder);
-  floatingTab = { element: tab, placeholder, grabX: originX - box.left, grabY: originY - box.top };
-  tab.style.width = `${box.width}px`; tab.style.height = `${box.height}px`; tab.classList.add('dragging'); document.body.classList.add('tab-dragging');
+  placeholder.style.width = `${box.width}px`; placeholder.style.height = `${box.height}px`;
+  const preview = tab.cloneNode(true) as HTMLElement; preview.className = 'tab-drag-preview'; preview.removeAttribute('role'); preview.removeAttribute('data-id'); preview.removeAttribute('tabindex'); preview.setAttribute('aria-hidden', 'true');
+  preview.style.width = `${box.width}px`; preview.style.height = `${box.height}px`;
+  floatingTab = { element: tab, preview, placeholder, grabX: originX - box.left, grabY: originY - box.top };
+  tab.style.width = `${box.width}px`; tab.style.height = `${box.height}px`; tab.style.left = `${left}px`; tab.style.top = `${top}px`;
+  tab.classList.add('dragging'); tab.before(placeholder); document.body.append(preview); document.body.classList.add('tab-dragging');
   positionFloatingTab(x, y);
 }
 function positionFloatingTab(x: number, y: number) {
   if (!floatingTab) return;
-  floatingTab.element.style.left = `${x - floatingTab.grabX}px`; floatingTab.element.style.top = `${y - floatingTab.grabY}px`;
+  floatingTab.preview.style.left = `${x - floatingTab.grabX}px`; floatingTab.preview.style.top = `${y - floatingTab.grabY}px`;
 }
 function clearTabDrop() { for (const tab of document.querySelectorAll('.tab')) tab.classList.remove('drop-before', 'drop-after'); }
 function markTabDrop(x: number) {
@@ -127,7 +131,7 @@ function scrollTabDrag() {
 function endTabDrag() {
   releaseTabPointer?.(); releaseTabPointer = null; cancelTabPointer = null;
   if (floatingTab) {
-    floatingTab.placeholder.remove(); floatingTab.element.classList.remove('dragging');
+    floatingTab.placeholder.remove(); floatingTab.preview.remove(); floatingTab.element.classList.remove('dragging');
     for (const property of ['left', 'top', 'width', 'height']) floatingTab.element.style.removeProperty(property);
     floatingTab = null;
   }
@@ -175,11 +179,12 @@ function renderTabs() {
       tab.setPointerCapture(event.pointerId);
       const pointerId = event.pointerId;
       releaseTabPointer = () => {
-        tab.onpointermove = null; tab.onpointerup = null; tab.onpointercancel = null; tab.onlostpointercapture = null;
+        window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', finish, true); window.removeEventListener('pointercancel', finish, true); tab.onlostpointercapture = null;
         if (tab.hasPointerCapture(pointerId)) tab.releasePointerCapture(pointerId);
       };
       const inside = (event: PointerEvent) => { const box = $('#tabbar').getBoundingClientRect(); return event.clientY >= box.top && event.clientY <= box.bottom && event.clientX >= box.left && event.clientX <= box.right; };
-      tab.onpointermove = event => {
+      const move = (event: PointerEvent) => {
+        if (event.pointerId !== pointerId) return;
         if (!started && Math.hypot(event.clientX - originX, event.clientY - originY) < 6) return;
         if (!started) { started = true; draggedTab = item.id; floatTab(tab, event.clientX, event.clientY, originX, originY); }
         event.preventDefault();
@@ -188,12 +193,13 @@ function renderTabs() {
         else { dragX = null; clearTabDrop(); $('#tabbar').classList.remove('drag-over'); floatingTab?.placeholder.classList.add('outside'); }
       };
       const finish = (event?: PointerEvent) => {
+        if (event && event.pointerId !== pointerId) return;
         if (!started) { releaseTabPointer?.(); releaseTabPointer = null; cancelTabPointer = null; return; }
         const accepted = event?.type === 'pointerup' && inside(event); const before = accepted ? markTabDrop(event.clientX) : null;
         skipClick = true; endTabDrag(); if (accepted) moveTab(item.id, before);
         if (previousFocus?.isConnected && $('#editor-stage').contains(previousFocus)) previousFocus.focus(); else activeEditor()?.focus();
       };
-      tab.onpointerup = finish; tab.onpointercancel = finish;
+      window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', finish, true); window.addEventListener('pointercancel', finish, true);
       tab.onlostpointercapture = () => finish(); cancelTabPointer = () => finish();
     };
     tab.ondragstart = event => { if (!event.dataTransfer || (event.target as HTMLElement).closest('.tab-close')) { event.preventDefault(); return; } draggedTab = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-replica-tab', item.id); const box = tab.getBoundingClientRect(); floatTab(tab, event.clientX || box.left + box.width / 2, event.clientY || box.top + box.height / 2); };
