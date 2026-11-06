@@ -10,6 +10,8 @@ import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
 import { repairWindowsShortcuts } from './windows-integration';
+import { PdfPreviews } from './pdf';
+import { validatePrintOptions, printPreferences } from '../shared/print';
 
 app.setName(APP_NAME);
 const appId = APP_ID;
@@ -22,6 +24,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'replica-media', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 const windows = new Map<string, BrowserWindow>();
+const pdfPreviews = new PdfPreviews();
 const allowedClose = new Set<number>();
 const closing = new Set<number>();
 const pendingClose = new Map<string, { sender: number; resolve: () => void }>();
@@ -94,7 +97,7 @@ function createWindow(id: string = store.newWindow()) {
       } catch (error) { closing.delete(window.id); notify(window, `暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`); }
     })();
   });
-  window.on('closed', () => { windows.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
+  window.on('closed', () => { pdfPreviews.release(id); windows.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
   window.webContents.on('render-process-gone', (_event, details) => { console.error('Renderer stopped:', details.reason); void store.persist().catch(() => {}); });
   if (devUrl) void window.loadURL(devUrl);
   else void window.loadURL('replica://app/index.html');
@@ -110,6 +113,11 @@ async function openFile(windowId: string, file: string) {
   if (result.windowId !== windowId) notify(windows.get(windowId)!, '这份文件已经在另一个窗口打开，已切换到那个窗口。');
 }
 function registerIpc() {
+  ipcMain.handle('pdf:preview', async (event, documentId: string, html: string, options) => {
+    try { const owner = windowIdOf(event); requireOwned(owner, documentId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('打印文档过大'); return await pdfPreviews.preview(owner, { ...store.documents.get(documentId)! }, html, validatePrintOptions(options)); }
+    catch (error) { return { ok: false, message: (error as Error).message }; }
+  });
+  ipcMain.handle('pdf:release', event => { pdfPreviews.release(windowIdOf(event)); });
   ipcMain.handle('workspace:bootstrap', event => workspaceView(windowIdOf(event)));
   ipcMain.handle('clipboard:text', async (event, action: string, text?: string) => { windowIdOf(event); if (action === 'write' && typeof text === 'string') { await clipboard.writeText(text); return ''; } if (action === 'read') return clipboard.readText(); throw new Error('剪贴板操作不受支持'); });
   const handle = (channel: string, action: (windowId: string, ...args: any[]) => Promise<void> | void) => {
@@ -118,6 +126,15 @@ function registerIpc() {
       catch (error) { if ((error as Error).message === 'canceled') return { ok: false, canceled: true }; return { ok: false, message: (error as Error).message }; }
     });
   };
+  handle('pdf:save', async (owner, previewId: string, fonts) => {
+    const pdf = pdfPreviews.get(owner, previewId); requireOwned(owner, pdf.documentId);
+    const result = await dialog.showSaveDialog(windows.get(owner)!, { title: '保存打印 PDF', defaultPath: (pdf.path ?? pdf.title).replace(/\.(md|markdown|mdown|mkd|txt)$/i, '') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (result.canceled || !result.filePath) throw new Error('canceled');
+    // A replacement request while the save dialog was open invalidates this job.
+    pdfPreviews.get(owner, previewId); requireOwned(owner, pdf.documentId); await atomicWrite(result.filePath, pdf.bytes);
+    const preferences = printPreferences({ ...store.preferences.print, ...(fonts ? { fonts } : {}) }); preferences.layout = pdf.options.layout; preferences.color = pdf.options.color; preferences.lineNumbers = pdf.options.lineNumbers; preferences.fonts[pdf.options.layout] = pdf.options.codeFontPt;
+    store.setPreferences({ print: preferences }); await store.persist();
+  });
   handle('document:new', id => { store.newDocument(id); });
   handle('document:activate', (windowId, id: string) => store.activate(windowId, id));
   handle('document:images', (windowId, id: string) => store.organizeImages(windowId, id));
@@ -267,7 +284,7 @@ else {
     if (!store.windows.size) { const id = store.newWindow(); store.newDocument(id); }
     for (const id of store.windows.keys()) createWindow(id);
     if (process.argv.includes('--new-window') && [...store.documents.values()].some(doc => doc.path || doc.content)) newBlankWindow();
-    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts };
+    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts, pdfPreviews };
     const target = process.argv.includes('--new-window') ? [...windows.keys()].at(-1)! : [...windows.keys()][0]; for (const file of initialFiles) await openFile(target, file).catch(error => notify(windows.get(target)!, error.message));
     launchReady = true; for (const request of queuedLaunches.splice(0)) handleLaunch(request.argv, request.cwd);
   }).catch(error => { console.error(error); dialog.showErrorBox(`${APP_NAME} 无法启动`, error.message); app.exit(1); });

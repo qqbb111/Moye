@@ -1,4 +1,5 @@
 import type { CodeThemeSnapshot } from './code-theme';
+import type { PrintOptions, PrintPreferences, PdfPreviewResult } from './print';
 export type SaveStatus = 'saved' | 'draft' | 'saving' | 'error' | 'conflict';
 export interface DocumentView {
   id: string;
@@ -22,7 +23,7 @@ export interface WorkspaceView {
   activeId: string | null;
   drafts: DocumentView[];
   recent: string[];
-  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; focus?: boolean; typewriter?: boolean; codeTheme?: 'modern-dark' | 'vscode' | 'github-dark'; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number };
+  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; focus?: boolean; typewriter?: boolean; codeTheme?: 'modern-dark' | 'vscode' | 'github-dark'; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; print?: PrintPreferences };
   codeTheme?: CodeThemeSnapshot;
   recovered: boolean;
 }
@@ -52,6 +53,9 @@ export interface RypotaBridge {
   openFolderFile(path: string): Promise<ActionResult>;
   insertImage(id: string, data?: { bytes: number[]; name: string }): Promise<{ url?: string; message?: string }>;
   exportDocument(id: string, format: 'html' | 'pdf', html: string): Promise<ActionResult>;
+  previewPdf(id: string, html: string, options: PrintOptions): Promise<PdfPreviewResult>;
+  savePdf(previewId: string, fonts?: PrintPreferences['fonts']): Promise<ActionResult>;
+  releasePdf(): Promise<void>;
   fullscreen(): void;
   clipboard(action: 'read' | 'write', text?: string): Promise<string>;
   finishClose(token: string): void;

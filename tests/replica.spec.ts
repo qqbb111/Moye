@@ -21,6 +21,50 @@ async function content(page: Page) { return page.evaluate(() => (window as any).
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
+test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住版式字号，编辑主题和原文不变', async () => {
+  const { application, page, directory } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1250, height: 900 }); window.showInactive(); });
+    const raw = '# 打印检查\n\n## 长代码\n\n```cpp\n' + Array.from({ length: 180 }, (_, i) => i === 49 ? '' : `    int code_${String(i).padStart(4, '0')} = ${i}; // PRINT_${String(i).padStart(4, '0')} 中文注释${i === 60 ? ' long_identifier_'.repeat(16) : ''}`).join('\n') + '\n```\n\n| 算法 | 复杂度 |\n| --- | --- |\n| BFS | O(n+m) |\n\n$$a^2+b^2=c^2$$\n\nPRINT_END';
+    await setContent(page, raw); await execute(page, 'export-pdf');
+    await expect(page.locator('#print-preview')).toBeVisible(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('#print-layout')).toHaveValue('portrait'); await expect(page.locator('#print-color')).toHaveValue('mono'); await expect(page.locator('#print-font')).toHaveValue('10'); await expect(page.locator('#print-lines')).toBeChecked();
+    await page.locator('#print-font').fill('10.5'); await page.locator('#print-layout').selectOption('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9');
+    await page.locator('#print-font').fill('9.5'); await page.locator('#print-color').selectOption('light'); await page.locator('#print-color').selectOption('mono'); await page.locator('#print-color').selectOption('light'); await page.locator('#print-lines').uncheck();
+    await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    await page.locator('#print-zoom').selectOption('0.75'); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible(); await page.locator('#print-zoom').selectOption('fit');
+    const token = await page.locator('#print-preview').getAttribute('data-preview-id');
+    const bytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__replicaTest; return [...api.pdfPreviews.get([...api.windows.keys()][0], token).bytes]; }, token);
+    const destination = path.join(directory, 'print-preview.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible();
+    expect(Buffer.from(await fs.readFile(destination)).equals(Buffer.from(bytes))).toBe(true); expect(await content(page)).toBe(raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'workbuddy');
+    await execute(page, 'export-pdf'); await expect(page.locator('#print-layout')).toHaveValue('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9.5'); await expect(page.locator('#print-lines')).not.toBeChecked();
+    await page.locator('#print-layout').selectOption('portrait'); await expect(page.locator('#print-font')).toHaveValue('10.5');
+    await page.evaluate(() => (window as any).__editor.setContent('# 原文已更新')); await expect(page.locator('#print-stale')).toBeVisible();
+    await page.locator('#print-refresh').click(); await expect(page.locator('#print-stale')).toBeHidden(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    const closedToken = await page.locator('#print-preview').getAttribute('data-preview-id'); await page.keyboard.press('Escape'); await expect(page.locator('#print-preview')).not.toBeVisible();
+    const result = await page.evaluate(token => window.rypota.savePdf(token!), closedToken); expect(result.ok).toBe(false);
+    expect(errors).toEqual([]);
+  } finally { await application.close(); }
+});
+
+test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关闭后的缓存不可保存', async () => {
+  const { application, page } = await launch();
+  try {
+    const id = await page.evaluate(async () => (await window.rypota.bootstrap()).activeId!);
+    const html = '<!doctype html><html><head></head><body>PRINT JOB</body></html>';
+    const options = { layout: 'portrait' as const, color: 'mono' as const, codeFontPt: 10, lineNumbers: true };
+    const result = await page.evaluate(async ({ id, html, options }) => Promise.all([window.rypota.previewPdf(id, html, options), window.rypota.previewPdf(id, html, options)]), { id, html, options });
+    expect(result[0].ok).toBe(false); expect(result[1].ok).toBe(true); if (!result[1].ok) throw new Error('Latest preview was not retained');
+    const token = result[1].previewId;
+    const invalid = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, { ...options, codeFontPt: 0 }), { id, html, options }); expect(invalid.ok).toBe(false);
+    await execute(page, 'new-window'); await expect.poll(() => application.windows().length).toBe(2); const other = application.windows().find(window => window !== page)!; await other.locator('.markdown-editor').waitFor();
+    expect((await other.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
+    expect((await other.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options })).ok).toBe(false);
+    const broken = await page.evaluate(({ id, options }) => window.rypota.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options }); expect(broken.ok).toBe(false); if (!broken.ok) expect(broken.message).toContain('图片解码失败');
+    await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
+  } finally { await application.close(); }
+});
+
 test('墨页名称、紧凑标题栏和文件切换入口在窄窗口也可用', async () => {
   const { application, page } = await launch();
   try {
@@ -361,7 +405,7 @@ test('文件树、相对图片、HTML 和 PDF 导出', async () => {
     await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder); await execute(page, 'folder'); await page.locator('#sidebar-content').getByRole('button', { name: '示例.md' }).click(); await expect(current(page).locator('.md-h1')).toContainText('导出测试');
     const image = current(page).locator('.md-image img'); await expect.poll(() => image.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const html = path.join(directory, '导出.html'); await chooseSave(application, html); await execute(page, 'export-html'); await expect.poll(() => fs.readFile(html, 'utf8').catch(() => '')).toContain('<strong>加粗</strong>'); expect(await fs.readFile(html, 'utf8')).toContain('data:image/png;base64,');
-    const pdf = path.join(directory, '导出.pdf'); await chooseSave(application, pdf); await execute(page, 'export-pdf'); await expect.poll(() => fs.readFile(pdf).then(bytes => bytes.subarray(0, 4).toString()).catch(() => '')).toBe('%PDF');
+    const pdf = path.join(directory, '导出.pdf'); await chooseSave(application, pdf); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); await page.locator('#print-save').click(); await expect.poll(() => fs.readFile(pdf).then(bytes => bytes.subarray(0, 4).toString()).catch(() => '')).toBe('%PDF');
   } finally { await application.close(); }
 });
 

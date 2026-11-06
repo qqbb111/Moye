@@ -24,7 +24,7 @@ function completeEmoji(context: CompletionContext) {
   return { from: match.from, options: Object.entries(emoji).map(([name, value]) => ({ label: `:${name}:`, detail: value, apply: `:${name}:`, type: 'text' })), validFor: /^:[a-z_0-9+-]*$/ };
 }
 export const sourceField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(sourceEffect)) value = effect.value; return value; } });
-type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void; workbuddy?: () => boolean; githubDark?: () => boolean };
+export type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void; workbuddy?: () => boolean; githubDark?: () => boolean };
 
 // Continuation lines keep a little more indent than the original code line.
 const hangingCodeIndent = EditorView.decorations.compute(['doc'], state => {
@@ -52,7 +52,7 @@ function enterAfter(view: EditorView, to: number) {
   const end = view.state.doc.length; const insert = to === end ? '\n\n' : '';
   view.dispatch({ changes: insert ? { from: end, insert } : undefined, selection: { anchor: Math.min(to + 1, end + insert.length) }, scrollIntoView: true }); view.focus();
 }
-function renderNode(node: MarkdownNode, host: Host): Node {
+export function renderNode(node: MarkdownNode, host: Host): Node {
   if (node.type === 'text') { const text = node.value ?? ''; if (!/==[^=\n]+==/.test(text)) return document.createTextNode(text); const fragment = document.createDocumentFragment(); let previous = 0; for (const match of text.matchAll(/==([^=\n]+)==/g)) { fragment.append(document.createTextNode(text.slice(previous, match.index))); const mark = document.createElement('mark'); mark.className = 'md-highlight'; mark.textContent = match[1]; fragment.append(mark); previous = match.index! + match[0].length; } fragment.append(document.createTextNode(text.slice(previous))); return fragment; }
   if (node.type === 'html') { const span = document.createElement('span'); span.innerHTML = DOMPurify.sanitize(node.value ?? ''); return span; }
   if (node.type === 'inlineMath' || node.type === 'math') { const span = document.createElement('span'); span.innerHTML = katex.renderToString(node.value ?? '', { throwOnError: false, displayMode: node.type === 'math', strict: 'ignore', trust: false }); return span; }

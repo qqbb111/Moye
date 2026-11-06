@@ -29,11 +29,11 @@ let shared: Promise<HighlighterCore> | undefined;
 const loading = new Map<string, Promise<void>>();
 function highlighter() {
   return shared ??= Promise.all([import('shiki/core'), import('shiki/engine/oniguruma')]).then(([core, engine]) => core.createHighlighterCore({
-    themes: [import('@shikijs/themes/github-dark')], langs: [], engine: engine.createOnigurumaEngine(import('shiki/wasm')),
+    themes: [import('@shikijs/themes/github-dark'), import('@shikijs/themes/github-light'), { name: 'moye-print-mono', type: 'light', colors: { 'editor.background': '#ffffff', 'editor.foreground': '#111111' }, tokenColors: [{ scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#444444' } }] }], langs: [], engine: engine.createOnigurumaEngine(import('shiki/wasm')),
   }));
 }
 
-export async function tokenizeGithub(source: string, language: string) {
+export async function tokenizeGithub(source: string, language: string, theme: 'github-dark' | 'github-light' | 'moye-print-mono' = 'github-dark') {
   const raw = language.trim().toLowerCase(), name = aliases[raw] ?? raw;
   const loader = grammars[name as keyof typeof grammars];
   if (!loader || source.length > 250_000) return null;
@@ -42,7 +42,7 @@ export async function tokenizeGithub(source: string, language: string) {
     if (!loading.has(name)) loading.set(name, loader().then(grammar => instance.loadLanguage(grammar)));
     await loading.get(name);
   }
-  return instance.codeToTokens(source, { lang: name, theme: 'github-dark' }).tokens;
+  return instance.codeToTokens(source, { lang: name, theme }).tokens;
 }
 
 export function attachGithubHighlighting(view: EditorView, language: () => string) {

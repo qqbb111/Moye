@@ -7,6 +7,16 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DocumentStore, FileConflictError } from '../electron/store';
 async function setup() { const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rypota-store-')); const store = new DocumentStore(path.join(directory, 'recovery'), { autoSave: 35, recovery: 10 }); await store.initialize(); const windowId = store.newWindow(); return { directory, store, windowId }; }
 
+test('打印偏好在重启后保留两套字号，文档和编辑主题保持原样', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '打印偏好不会改变代码');
+    store.setPreferences({ print: { layout: 'landscape-two-column', color: 'light', lineNumbers: false, fonts: { portrait: 10.5, 'landscape-two-column': 9.5 } } }); await store.flush();
+    const restored = new DocumentStore(store.directory); await restored.initialize();
+    try { assert.deepEqual(restored.preferences.print, store.preferences.print); assert.equal(restored.preferences.theme, 'workbuddy'); assert.equal(restored.documents.get(id)?.content, '打印偏好不会改变代码'); } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
+
 test('阅读宽度、侧栏宽度和代码折行校验范围，恢复时保留草稿和显示偏好', async () => {
   const { store, windowId } = await setup();
   try {

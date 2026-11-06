@@ -1,7 +1,7 @@
 {
   "name": "typora-replica",
   "productName": "墨页 Moye",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "private": true,
   "description": "保留 Markdown 原文的即时排版桌面编辑器",
   "main": "dist-electron/main.cjs",
@@ -31,6 +31,7 @@
     "jsonc-parser": "3.3.1",
     "katex": "0.19.0",
     "mermaid": "12.2.0",
+    "pdfjs-dist": "6.5.438",
     "remark-gfm": "4.0.1",
     "remark-math": "6.0.0",
     "remark-parse": "11.0.0",

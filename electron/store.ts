@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DocumentView, WorkspaceView } from '../shared/types';
 import { tidyChineseMarkdown, applyEdits } from '../shared/markdown-tools';
+import { printPreferences } from '../shared/print';
 import { ImageAttachments } from './images';
 
 interface DocumentRecord extends DocumentView {
@@ -228,6 +229,7 @@ export class DocumentStore {
     this.windows.delete(windowId); this.changed();
   }
   setPreferences(preferences: Partial<WorkspaceView['preferences']>) {
+    if (preferences.print) this.preferences.print = printPreferences(preferences.print);
     if (typeof preferences.autoSave === 'boolean') this.preferences.autoSave = preferences.autoSave;
     if (typeof preferences.formatOnSave === 'boolean') this.preferences.formatOnSave = preferences.formatOnSave;
     if (typeof preferences.codeWrap === 'boolean') this.preferences.codeWrap = preferences.codeWrap;
