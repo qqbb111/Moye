@@ -1,0 +1,51 @@
+/* Adapted from the user-supplied WorkBuddy smart-doc preview values. */
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 400; font-display: swap; src: url('../../assets/fonts/SourceCodePro-Regular.woff2') format('woff2'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 700; font-display: swap; src: url('../../assets/fonts/SourceCodePro-Bold.woff2') format('woff2'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 400; font-display: swap; src: url('../../assets/fonts/SourceCodePro-It.woff2') format('woff2'); }
+
+:root[data-theme='workbuddy'] {
+  color-scheme: dark;
+  --bg: #1f1f1f; --fg: #e9e9e9; --muted: #ffffff80; --surface: #1b1b1b;
+  --border: #ffffff1f; --hover: #ffffff0d; --link: #0088ff; --code: #c8c8c826;
+  --chrome: #1d1d1d; --accent-soft: #303030; --selection: #2383e247;
+  --prose-font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', '微软雅黑', Helvetica, Arial, 'Segoe UI', sans-serif;
+  --wb-mono: 'Source Code Pro', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Cascadia Mono', 'Courier New', monospace;
+}
+:root[data-theme='workbuddy'] .markdown-editor > .cm-scroller { font-size: var(--font-size); line-height: 1.7 !important; -webkit-font-smoothing: antialiased; }
+:root[data-theme='workbuddy'] .markdown-editor > .cm-scroller > .cm-content { max-width: var(--reading-width); padding: 32px 48px 96px !important; }
+:root[data-theme='workbuddy'] .markdown-editor > .cm-scroller > .cm-content > .cm-line { line-height: 1.7; min-height: 1.7em; }
+:root[data-theme='workbuddy'] .markdown-editor > .cm-scroller > .cm-content > .cm-line:has(>br:only-child) { min-height: 12px !important; height: 12px; line-height: 12px !important; }
+:root[data-theme='workbuddy'] .md-heading { font-weight: 600; color: #ffffffe6; padding-top: 12px !important; padding-bottom: 0 !important; line-height: 1.4 !important; }
+:root[data-theme='workbuddy'] .md-heading:first-child { padding-top: 0 !important; }
+:root[data-theme='workbuddy'] .md-h1 { font-size: 1.625em; letter-spacing: normal; }
+:root[data-theme='workbuddy'] .md-h2 { font-size: 1.375em; }
+:root[data-theme='workbuddy'] .md-h3 { font-size: 1.125em; }
+:root[data-theme='workbuddy'] .md-h4, :root[data-theme='workbuddy'] .md-h5, :root[data-theme='workbuddy'] .md-h6 { font-size: 1em; line-height: 1.5 !important; }
+:root[data-theme='workbuddy'] .md-h6 { color: var(--muted); }
+:root[data-theme='workbuddy'] .md-strong, :root[data-theme='workbuddy'] .md-strong span { font-weight: 600 !important; }
+:root[data-theme='workbuddy'] .md-link { text-decoration: none; }
+:root[data-theme='workbuddy'] .md-link:hover { text-decoration: underline; }
+:root[data-theme='workbuddy'] .md-quote { padding: 2px 0 2px 14px !important; border-left: 3px solid #ffffff26; border-radius: 0; background: transparent; color: #ffffff80; }
+:root[data-theme='workbuddy'] .md-inline-code { font: .93em/1.7 var(--wb-mono); padding: .15em .35em; color: #ffffffe6; background: #c8c8c826; border: 0; border-radius: 4px; }
+:root[data-theme='workbuddy'] .md-widget { padding: 12px 0; }
+:root[data-theme='workbuddy'] .md-table { padding-top: 0; }
+:root[data-theme='workbuddy'] .table-toolbar { top: -22px; }
+:root[data-theme='workbuddy'] .table-toolbar button { font: 11px/1.4 var(--ui-font); padding: 2px 5px; }
+:root[data-theme='workbuddy'] .md-table table { width: 100%; min-width: 0; background: #131414; font-size: .9375em; }
+:root[data-theme='workbuddy'] .md-table td, :root[data-theme='workbuddy'] .md-table th { padding: 8px 12px; border: 1px solid #3a3b3b; background: #131414; vertical-align: top; text-align: left; }
+:root[data-theme='workbuddy'] .md-table strong { font-weight: 600; }
+:root[data-theme='workbuddy'] .md-table th { background: #252526; color: #ffffffe6; font-weight: 600; }
+:root[data-theme='workbuddy'] .md-table [contenteditable='true'] { background: #1f1f1f; }
+:root[data-theme='workbuddy'] .md-code:not(.md-diagram) { border-radius: 10px; box-shadow: none; }
+:root[data-theme='workbuddy'] .code-content .cm-scroller { font-family: var(--wb-mono) !important; font-size: calc(var(--font-size) * .875); line-height: 1.7 !important; }
+:root[data-theme='workbuddy'] .code-content .cm-content { font-family: inherit; min-width: 0; flex-grow: 1; padding: 10px 16px 10px 0 !important; }
+:root[data-theme='workbuddy'] .code-content .cm-line { min-height: 1.7em; line-height: 1.7; }
+:root[data-theme='workbuddy'] .code-content .cm-gutters { display: flex; background: transparent; color: #7b7b7b; border: 0; min-width: 44px; font-family: inherit; font-size: inherit; }
+:root[data-theme='workbuddy'] .code-content .cm-lineNumbers .cm-gutterElement { min-width: 44px; padding: 0 12px 0 0; text-align: right; font-variant-numeric: tabular-nums; }
+:root[data-theme='workbuddy'] .md-code .code-toolbar { position: absolute; top: 7px; right: 8px; height: 28px; padding: 1px 4px; gap: 4px; border: 1px solid #ffffff1f; border-radius: 5px; background: #252526; opacity: 0; pointer-events: none; z-index: 2; }
+:root[data-theme='workbuddy'] .md-code:hover .code-toolbar, :root[data-theme='workbuddy'] .md-code:focus-within .code-toolbar { opacity: 1; pointer-events: auto; }
+:root[data-theme='workbuddy'] .code-toolbar .code-lines { display: none; }
+:root[data-theme='workbuddy'] .code-toolbar input { width: 64px; font-size: 11px; }
+/* Shiki inline styles win; parser-generated class colors must inherit them. */
+.md-code[data-github-dark='true'] .cm-editor[data-shiki='ready'] .cm-line span { color: inherit; }
+@media (max-width: 800px) { :root[data-theme='workbuddy'] .markdown-editor > .cm-scroller > .cm-content { padding-left: 24px !important; padding-right: 24px !important; } }

@@ -12,12 +12,30 @@ test('阅读宽度、侧栏宽度和代码折行校验范围，恢复时保留�
   try {
     const id = store.newDocument(windowId, '显示偏好不能影响草稿');
     store.setPreferences({ readingWidth: Infinity, sidebarWidth: NaN });
-    assert.equal(store.preferences.readingWidth, 880); assert.equal(store.preferences.sidebarWidth, 256);
+    assert.equal(store.preferences.readingWidth, 900); assert.equal(store.preferences.sidebarWidth, 256);
     store.setPreferences({ readingWidth: 50000, sidebarWidth: 0, codeWrap: true });
     assert.equal(store.preferences.readingWidth, 1200); assert.equal(store.preferences.sidebarWidth, 200);
     store.setPreferences({ readingWidth: 720, sidebarWidth: 310 }); await store.flush();
     const restored = new DocumentStore(store.directory); await restored.initialize();
     try { assert.equal(restored.preferences.readingWidth, 720); assert.equal(restored.preferences.sidebarWidth, 310); assert.equal(restored.preferences.codeWrap, true); assert.equal(restored.view(windowId).documents.find(doc => doc.id === id)?.content, '显示偏好不能影响草稿'); } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
+
+test('旧版首次升级默认启用 WorkBuddy，保留文档与保存设置，之后尊重用户主题选择', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '旧草稿 **一字不改**'); store.setPreferences({ autoSave: false, fontSize: 20, sidebarWidth: 310 }); await store.flush();
+    const snapshot = JSON.parse(await fs.readFile(store.sessionPath, 'utf8')); delete snapshot.preferences.appearanceRevision;
+    Object.assign(snapshot.preferences, { theme: 'copilot', codeTheme: 'modern-dark', readingWidth: 880, codeWrap: false }); await fs.writeFile(store.sessionPath, JSON.stringify(snapshot));
+    const restored = new DocumentStore(store.directory); await restored.initialize();
+    try {
+      assert.equal(restored.preferences.theme, 'workbuddy'); assert.equal(restored.preferences.codeTheme, 'github-dark'); assert.equal(restored.preferences.codeWrap, true); assert.equal(restored.preferences.readingWidth, 900);
+      assert.equal(restored.preferences.autoSave, false); assert.equal(restored.preferences.fontSize, 20); assert.equal(restored.preferences.sidebarWidth, 310);
+      assert.equal(restored.documents.get(id)?.content, snapshot.documents[0].content); assert.equal(restored.documents.get(id)?.revision, snapshot.documents[0].revision);
+      restored.setPreferences({ theme: 'light', codeTheme: 'modern-dark' }); await restored.flush();
+      const again = new DocumentStore(store.directory); await again.initialize();
+      try { assert.equal(again.preferences.theme, 'light'); assert.equal(again.preferences.codeTheme, 'modern-dark'); assert.equal(again.preferences.appearanceRevision, 1); assert.equal(again.documents.get(id)?.content, '旧草稿 **一字不改**'); } finally { again.dispose(); }
+    } finally { restored.dispose(); }
   } finally { store.dispose(); }
 });
 

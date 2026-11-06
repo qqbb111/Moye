@@ -1,5 +1,5 @@
 import { EditorState, StateEffect, StateField, Prec, EditorSelection, Compartment, ChangeSet, type Extension } from '@codemirror/state';
-import { EditorView, Decoration, WidgetType, keymap, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, type DecorationSet } from '@codemirror/view';
+import { EditorView, Decoration, WidgetType, keymap, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, indentWithTab, undo, redo, selectLine, isolateHistory } from '@codemirror/commands';
 import { markdown, markdownLanguage, insertNewlineContinueMarkup, deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete';
@@ -10,6 +10,7 @@ import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { parseMarkdown, walk, startOf, endOf, plainText, headings, tableRows, serializeTable, type MarkdownNode } from './markdown';
 import { vscodeHighlightStyle } from './code-highlighting';
+import { attachGithubHighlighting, githubTokens, tokenizeGithub } from './github-highlighting';
 import { copyIcon, checkIcon } from './code-icons';
 import { icon, type IconName } from './icons';
 import { textEdits, toggleMarkup, tidyChineseMarkdown } from '../shared/markdown-tools';
@@ -23,7 +24,7 @@ function completeEmoji(context: CompletionContext) {
   return { from: match.from, options: Object.entries(emoji).map(([name, value]) => ({ label: `:${name}:`, detail: value, apply: `:${name}:`, type: 'text' })), validFor: /^:[a-z_0-9+-]*$/ };
 }
 export const sourceField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(sourceEffect)) value = effect.value; return value; } });
-type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void };
+type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void; workbuddy?: () => boolean; githubDark?: () => boolean };
 
 // Continuation lines keep a little more indent than the original code line.
 const hangingCodeIndent = EditorView.decorations.compute(['doc'], state => {
@@ -145,9 +146,17 @@ class BlockWidget extends WidgetType {
       const replacement = `${closing}${language.value.trim()}\n${value}\n${closing}`;
       outer.dispatch({ changes: { from: current.from, to: current.to, insert: replacement } });
     };
-    const languageConfig = new Compartment();
-    const extensions: Extension[] = [history(), drawSelection(), syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Alt-z', run: toggleWrap }, { key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); commit(update.state.doc.toString()); } })];
+    const languageConfig = new Compartment(); const gutterConfig = new Compartment(); let numbered = !!ctx.host.workbuddy?.();
+    let github: ReturnType<typeof attachGithubHighlighting>;
+    const extensions: Extension[] = [history(), drawSelection(), githubTokens, syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), gutterConfig.of(numbered ? lineNumbers() : []), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Alt-z', run: toggleWrap }, { key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); github?.refresh(); commit(update.state.doc.toString()); } })];
     const code = new EditorView({ state: EditorState.create({ doc: ctx.node.value ?? '', extensions }), parent: content }); widgetEditors.set(root, code);
+    github = attachGithubHighlighting(code, () => language.value);
+    const setAppearance = (workbuddy: boolean, githubDark: boolean) => {
+      if (numbered !== workbuddy) { numbered = workbuddy; code.dispatch({ effects: gutterConfig.reconfigure(workbuddy ? lineNumbers() : []) }); }
+      root.dataset.githubDark = String(githubDark); github.setEnabled(githubDark);
+    };
+    (root as any).setCodeAppearance = setAppearance; (root as any).disposeGithub = github.destroy;
+    setAppearance(numbered, !!ctx.host.githubDark?.());
     (root as any).setCodeWrap = setWrap; updateCount(code.state);
     if ((ctx.node.lang ?? '').toLowerCase() === 'mermaid') {
       root.classList.add('md-diagram'); const preview = document.createElement('div'); preview.className = 'diagram-preview'; root.prepend(preview); let sequence = 0; let timer: ReturnType<typeof setTimeout>;
@@ -163,7 +172,7 @@ class BlockWidget extends WidgetType {
       void sync;
     }
     let languageRevision = 0; let languageName = '';
-    const syncLanguage = (name: string) => { name = name.trim().toLowerCase(); if (name === languageName) return; languageName = name; const revision = ++languageRevision; const selected = languages.find(item => item.name.toLowerCase() === name || item.alias.includes(name));
+    const syncLanguage = (name: string) => { name = name.trim().toLowerCase(); if (name === languageName) return; languageName = name; github.refresh(0); const revision = ++languageRevision; const selected = languages.find(item => item.name.toLowerCase() === name || item.alias.includes(name));
       if (!selected) { code.dispatch({ effects: languageConfig.reconfigure([]) }); return; }
       void selected.load().then(support => { if (revision === languageRevision && root.isConnected) code.dispatch({ effects: languageConfig.reconfigure(support) }); }).catch(() => {});
     };
@@ -197,7 +206,7 @@ class BlockWidget extends WidgetType {
           if (event.key === 'Escape') { event.preventDefault(); cell.textContent = rows[index][col]; cell.blur(); outer.focus(); }
         }; tr.append(cell);
       }); table.append(tr); });
-    }; draw(); root.append(toolbar, table);
+    }; draw(); const content = document.createElement('div'); content.className = 'table-content'; content.append(table); root.append(toolbar, content);
     (root as any).syncTable = (ctx: Context) => {
       const focused = root.contains(document.activeElement) && document.activeElement?.matches('th[contenteditable=true],td[contenteditable=true]') ? document.activeElement as HTMLElement : null;
       const oldText = focused?.textContent ?? ''; const native = window.getSelection(); let anchor = 0, head = 0;
@@ -229,7 +238,7 @@ class BlockWidget extends WidgetType {
     if (this.kind === 'math' && !root.contains(document.activeElement)) { root.querySelector('textarea')!.value = this.context.node.value ?? ''; root.querySelector('.math-result')!.innerHTML = katex.renderToString(this.context.node.value ?? '', { displayMode: true, throwOnError: false, strict: 'ignore', trust: false }); }
     return true;
   }
-  destroy(frame: HTMLElement) { (frame as any).disposeMeasure?.(); const root = frame.firstElementChild as HTMLElement; (root as any).diagramDispose?.(); widgetEditors.get(root)?.destroy(); }
+  destroy(frame: HTMLElement) { (frame as any).disposeMeasure?.(); const root = frame.firstElementChild as HTMLElement; (root as any).diagramDispose?.(); (root as any).disposeGithub?.(); widgetEditors.get(root)?.destroy(); }
   ignoreEvent() { return true; }
 }
 function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): DecorationSet {
@@ -441,6 +450,7 @@ export class MarkdownEditor {
   get content() { return this.view.state.doc.toString(); }
   get source() { return this.view.state.field(sourceField); }
   setCodeWrap(enabled: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeWrap?.(enabled); }
+  setCodeAppearance(workbuddy: boolean, githubDark: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeAppearance?.(workbuddy, githubDark); }
   setSource(source: boolean) { this.view.dispatch({ effects: sourceEffect.of(source) }); this.view.dom.dataset.source = String(source); this.view.focus(); }
   replace(content: string) { if (this.view.compositionStarted && this.view.state.field(quoteCompositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }
   insertImage(url: string, alt = '图片') { const label = alt.replace(/[\[\]\\\r\n]/g, ' '); const markdown = `![${label}](${url})`; insertBlock(this.view, markdown, markdown.length + 2); }
@@ -460,6 +470,17 @@ export async function exportHTML(source: string, host: Host): Promise<string> {
     return renderNode(node, host);
   }; for (const child of parseMarkdown(source).children ?? []) {
     if (child.type === 'yaml') continue;
+    if (child.type === 'code' && child.lang !== 'mermaid' && host.workbuddy?.()) {
+      const value = child.value ?? ''; const pre = document.createElement('pre'); pre.className = 'wb-code'; const code = document.createElement('code');
+      const colored = host.githubDark?.() ? await tokenizeGithub(value, child.lang ?? '').catch(() => null) : null;
+      const lines = colored ?? value.split('\n').map(content => [{ content, color: '#e1e4e8', fontStyle: 0 }]);
+      for (const [index, tokens] of lines.entries()) {
+        const line = document.createElement('span'); line.className = 'line';
+        for (const token of tokens) { const span = document.createElement('span'); span.textContent = token.content; span.style.color = token.color ?? '#e1e4e8'; if ((token.fontStyle ?? 0) & 1) span.style.fontStyle = 'italic'; if ((token.fontStyle ?? 0) & 2) span.style.fontWeight = '700'; line.append(span); }
+        code.append(line); if (index < lines.length - 1) code.append(document.createTextNode('\n'));
+      }
+      pre.append(code); root.append(pre); continue;
+    }
     if (child.type === 'code' && child.lang === 'mermaid') {
       try { const { default: mermaid } = await import('mermaid'); mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false }); const diagram = await mermaid.render(`export-${crypto.randomUUID()}`, child.value ?? ''); const block = document.createElement('div'); block.innerHTML = DOMPurify.sanitize(diagram.svg, { USE_PROFILES: { svg: true, svgFilters: true } }); root.append(block); continue; } catch { /* Incomplete diagrams remain readable as code. */ }
     }

@@ -53,7 +53,7 @@ export class DocumentStore {
   readonly windows = new Map<string, WindowRecord>();
   readonly images: ImageAttachments;
   recent: string[] = [];
-  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'light', fontSize: 16, sidebar: false, tabs: true, focus: false, typewriter: false, codeTheme: 'modern-dark', codeWrap: false, readingWidth: 880, sidebarWidth: 256 };
+  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'workbuddy', fontSize: 16, sidebar: false, tabs: true, focus: false, typewriter: false, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
   recovered = false;
   onChanged: () => void = () => {};
   onError: (message: string) => void = () => {};
@@ -77,6 +77,8 @@ export class DocumentStore {
     if (!snapshot) return;
     this.recovered = true;
     this.preferences = { ...this.preferences, ...snapshot.preferences };
+    const migrateAppearance = (snapshot.preferences?.appearanceRevision ?? 0) < 1;
+    if (migrateAppearance) Object.assign(this.preferences, { theme: 'workbuddy', codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, appearanceRevision: 1 });
     let migratedImages = false;
     this.recent = Array.isArray(snapshot.recent) ? snapshot.recent.filter(x => typeof x === 'string').slice(0, 12) : [];
     for (const item of snapshot.documents) {
@@ -106,7 +108,7 @@ export class DocumentStore {
       ids.forEach(id => owned.add(id));
       this.windows.set(item.id, { id: item.id, documentIds: ids, activeId: ids.includes(item.activeId ?? '') ? item.activeId : ids[0] ?? null });
     }
-    if (migratedImages) await this.persist();
+    if (migratedImages || migrateAppearance) await this.persist();
   }
   newWindow() {
     const window: WindowRecord = { id: randomUUID(), documentIds: [], activeId: null };
@@ -232,8 +234,8 @@ export class DocumentStore {
     for (const [key, minimum, maximum] of [['readingWidth', 640, 1200], ['sidebarWidth', 200, 420]] as const) {
       const value = preferences[key]; if (typeof value === 'number' && Number.isFinite(value)) this.preferences[key] = Math.round(Math.max(minimum, Math.min(maximum, value)));
     }
-    if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot') this.preferences.theme = preferences.theme;
-    if (preferences.codeTheme === 'modern-dark' || preferences.codeTheme === 'vscode') this.preferences.codeTheme = preferences.codeTheme;
+    if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot' || preferences.theme === 'workbuddy') this.preferences.theme = preferences.theme;
+    if (preferences.codeTheme === 'modern-dark' || preferences.codeTheme === 'vscode' || preferences.codeTheme === 'github-dark') this.preferences.codeTheme = preferences.codeTheme;
     if (typeof preferences.fontSize === 'number' && Number.isFinite(preferences.fontSize)) this.preferences.fontSize = Math.max(14, Math.min(24, preferences.fontSize));
     for (const key of ['sidebar', 'tabs', 'focus', 'typewriter'] as const) if (typeof preferences[key] === 'boolean') this.preferences[key] = preferences[key];
     if (!this.preferences.autoSave) { for (const timer of this.autoTimers.values()) clearTimeout(timer); this.autoTimers.clear(); }

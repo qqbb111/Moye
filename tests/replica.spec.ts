@@ -21,16 +21,56 @@ async function content(page: Page) { return page.evaluate(() => (window as any).
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
-test('长代码默认横向滚动，折行保留续行缩进，切换不改原文和撤销并在重启后恢复', async () => {
+test('WorkBuddy 排版、嵌入字体、行号槽与 Shiki github-dark 代表色实际生效', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1100, height: 900 }); window.showInactive(); });
+    const raw = '# 图论\n\n## 搜索与拓扑\n\n### BFS\n\n正文采用参考字体。\n\n```cpp\n// 注释\nint value = 5;\nvoid bfs(int sx) { return; }\n```\n\n| 题面信号 | 去哪 |\n| --- | --- |\n| 最长链 | 直径 |\n\n结尾';
+    await setContent(page, raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'workbuddy');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(31, 31, 31)');
+    const slot = current(page); await expect(slot.locator('.md-h1')).toHaveCSS('font-size', '26px'); await expect(slot.locator('.md-h2')).toHaveCSS('font-size', '22px'); await expect(slot.locator('.md-h3')).toHaveCSS('font-size', '18px');
+    const block = slot.locator('.md-code'); await expect(block).toHaveCSS('background-color', 'rgb(30, 30, 30)'); await expect(block).toHaveCSS('border-radius', '10px');
+    await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready', { timeout: 15000 }); await page.evaluate(async () => { await document.fonts.ready; });
+    for (const [word, color] of [['int', 'rgb(249, 117, 131)'], ['// 注释', 'rgb(106, 115, 125)'], ['5', 'rgb(121, 184, 255)'], ['bfs', 'rgb(179, 146, 240)']]) await expect(block.locator('.shiki-token').filter({ hasText: new RegExp('^' + word + '$') }).first()).toHaveCSS('color', color);
+    await expect(block.locator('.cm-scroller')).toHaveCSS('font-size', '14px'); await expect(block.locator('.cm-gutters')).toHaveCSS('min-width', '44px');
+    const number = block.locator('.cm-lineNumbers .cm-gutterElement').filter({ hasText: /^1$/ }); const line = block.locator('.cm-line').first(); expect(Math.abs((await number.boundingBox())!.y - (await line.boundingBox())!.y)).toBeLessThan(2);
+    await block.locator('.shiki-token').filter({ hasText: /^int$/ }).first().evaluate(element => { let leaf: Element = element; while (leaf.firstElementChild) leaf = leaf.firstElementChild; leaf.setAttribute('data-font-probe', 'code'); });
+    const cdp = await page.context().newCDPSession(page); await cdp.send('DOM.enable'); await cdp.send('CSS.enable'); const { root } = await cdp.send('DOM.getDocument'); const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '[data-font-probe="code"]' });
+    const fonts = await cdp.send('CSS.getPlatformFontsForNode', { nodeId }); expect(fonts.fonts.some(font => font.familyName === 'Source Code Pro' && font.isCustomFont && font.glyphCount > 0), JSON.stringify(fonts.fonts)).toBe(true);
+    await expect(slot.locator('.md-table th').first()).toHaveCSS('background-color', 'rgb(37, 37, 38)'); await expect(slot.locator('.md-table th').first()).toHaveCSS('text-align', 'left'); await expect(slot.locator('.md-table td').first()).toHaveCSS('background-color', 'rgb(19, 20, 20)');
+    const exported = path.join(directory, 'workbuddy.html'); await chooseSave(application, exported); await execute(page, 'export-html');
+    await expect.poll(() => fs.readFile(exported, 'utf8').catch(() => '')).toContain('Source Code Pro');
+    const html = await fs.readFile(exported, 'utf8'); expect(html).toContain('data:font/woff2;base64,'); expect(html).toContain('background:#1f1f1f'); expect(html).toContain('rgb(249, 117, 131)'); expect(html).toContain('class="line"');
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
+test('Shiki 异步着色不打断代码组合输入、选区与撤销，换语言和主题后不残留旧颜色', async () => {
+  const { application, page } = await launch();
+  try {
+    const code = 'int value = 42;\n// '; await setContent(page, '```cpp\n' + code + '\n```\n\n结尾'); const block = current(page).locator('.md-code'); const editor = block.locator('.cm-content');
+    await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready', { timeout: 15000 }); await editor.focus(); await page.keyboard.press('Control+End');
+    const cdp = await page.context().newCDPSession(page); await cdp.send('Input.imeSetComposition', { text: 'zhongwen', selectionStart: 8, selectionEnd: 8 }); await cdp.send('Input.insertText', { text: '中文' });
+    await expect.poll(() => content(page)).toContain('// 中文\n```'); await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready'); expect((await content(page)).match(/中文/g)).toHaveLength(1); await expect(editor).toBeFocused();
+    await page.keyboard.insertText('输入'); await expect.poll(() => content(page)).toContain('// 中文输入\n```'); await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready'); const typed = await content(page);
+    await page.keyboard.press('Control+z'); await expect.poll(() => content(page)).not.toBe(typed); expect(await content(page)).not.toContain('输入'); await page.keyboard.press('Control+Shift+z'); await expect.poll(() => content(page)).toBe(typed);
+    await block.hover(); await block.getByRole('textbox', { name: '代码语言', exact: true }).fill('plaintext'); await block.getByRole('textbox', { name: '代码语言', exact: true }).press('Tab'); await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'fallback'); await expect(block.locator('.shiki-token')).toHaveCount(0);
+    await block.getByRole('textbox', { name: '代码语言', exact: true }).fill('cpp'); await block.getByRole('textbox', { name: '代码语言', exact: true }).press('Tab'); await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready');
+    await execute(page, 'code-modern'); await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'disabled'); await expect(block.locator('.shiki-token')).toHaveCount(0); await expect(block.locator('.cm-line span').filter({ hasText: /^42$/ })).toHaveCSS('color', 'rgb(181, 206, 168)');
+  } finally { await application.close(); }
+});
+
+test('长代码可横向滚动或悬挂折行，切换不改原文和撤销并在重启后恢复', async () => {
   let app = await launch(); const code = 'void build(int n) {\n    for (int i = 1; i <= n; ++i) dfn[i] = scc[i] = szc[i] = in[i] = vis[i] = 0, graph[i].clear(), reverse_graph[i].clear();\n}'; const raw = `# 算法笔记\n\n\`\`\`cpp\n${code}\n\`\`\`\n\n结尾`;
   try {
     const native = await app.application.browserWindow(app.page); await native.evaluate(window => { window.setBounds({ width: 920, height: 760 }); window.showInactive(); });
+    await app.page.evaluate(() => window.rypota.updatePreferences({ codeWrap: false }));
     await setContent(app.page, raw); const block = current(app.page).locator('.md-code'); const scroller = block.locator('.cm-scroller'); const wrap = block.getByRole('button', { name: '代码自动换行', exact: true });
     await expect(wrap).toHaveAttribute('aria-pressed', 'false');
     await expect.poll(() => scroller.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(100);
     expect(await app.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const longLine = block.locator('.cm-line').filter({ hasText: 'for (int i = 1;' }); const flatHeight = (await longLine.boundingBox())!.height;
-    await wrap.click(); await expect(wrap).toHaveAttribute('aria-pressed', 'true');
+    await block.hover(); await wrap.click(); await expect(wrap).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(async () => (await longLine.boundingBox())!.height).toBeGreaterThan(flatHeight * 1.5);
     expect(await longLine.evaluate(element => parseFloat(getComputedStyle(element).textIndent))).toBeLessThan(0); expect(await content(app.page)).toBe(raw);
     await block.locator('.cm-content').click(); await app.page.keyboard.press('Alt+z'); await expect(wrap).toHaveAttribute('aria-pressed', 'false');
@@ -103,7 +143,7 @@ test('图片及块组件之后点击正文按实际坐标定位，滚动和主�
   try {
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 900 }); window.showInactive(); });
     const image = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620"><rect width="900" height="620" fill="#ddeeff"/></svg>').toString('base64');
-    for (const theme of ['light', 'dark', 'copilot']) {
+    for (const theme of ['light', 'dark', 'copilot', 'workbuddy']) {
       await execute(page, theme);
       const raw = `![图](${image})\n\n32 位操作系统，每个进程独占 4G 内存（进程虚拟内存地址空间大小）\n\n\`\`\`cpp\nint value = 42;\n\`\`\`\n\n| 标题 | 状态 |\n| --- | --- |\n| 内容 | 完成 |\n\n第二段正文的中间位置可以修改\n\n末尾`;
       await setContent(page, raw); await expect.poll(() => current(page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
@@ -389,7 +429,7 @@ test('任务栏重新启动和普通再次启动均创建新的独立空白窗�
 test('现代深色语法颜色与图标复制，修改代码语言后立即重新着色', async () => {
   const { application, page } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
-    const code = '// 注释\nint main() {\n  if (true) return 42;\n  auto text = "hello";\n}'; await setContent(page, `代码测试\n\n\`\`\`cpp\n${code}\n\`\`\`\n`); await execute(page, 'copilot');
+    const code = '// 注释\nint main() {\n  if (true) return 42;\n  auto text = "hello";\n}'; await setContent(page, `代码测试\n\n\`\`\`cpp\n${code}\n\`\`\`\n`); await execute(page, 'copilot'); await execute(page, 'code-modern');
     const block = current(page).locator('.md-code'); await expect(block).toHaveCSS('background-color', 'rgb(31, 31, 31)');
     await expect(block.locator('.cm-line span').filter({ hasText: /^\/\/ 注释$/ })).toHaveCSS('color', 'rgb(106, 153, 85)');
     await expect(block.locator('.cm-line span').filter({ hasText: /^if$/ })).toHaveCSS('color', 'rgb(197, 134, 192)');

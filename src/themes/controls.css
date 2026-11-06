@@ -115,6 +115,8 @@ details > summary:hover { background: var(--hover); }
 .md-table tr:nth-child(2n) { background: transparent; }
 .md-table tbody tr:hover, .md-table tr:focus-within { background: color-mix(in srgb, var(--link) 4%, transparent); }
 .table-toolbar { gap: 4px; }
+.md-table { overflow: visible; }
+.table-content { max-width: 100%; overflow-x: auto; }
 .table-toolbar button { border-radius: 4px; padding: 3px 6px; color: var(--muted); }
 .markdown-editor .cm-selectionBackground { background: var(--selection) !important; }
 .cm-editor[data-source='true'] > .cm-scroller > .cm-content { font-size: .9em; }

@@ -20,5 +20,6 @@ function visit(packagePath) {
 }
 const own = JSON.parse(readFileSync('package.json', 'utf8'));
 for (const name of Object.keys(own.dependencies)) visit(path.resolve('node_modules', name, 'package.json'));
+if (existsSync('assets/fonts/LICENSE-SourceCodePro.txt')) records.push(`Source Code Pro\nLicense: SIL Open Font License 1.1\nhttps://github.com/adobe-fonts/source-code-pro\n\n${readFileSync('assets/fonts/LICENSE-SourceCodePro.txt', 'utf8')}`);
 writeFileSync('THIRD_PARTY_NOTICES.txt', `Typora Replica third-party notices\n\nThis inventory covers installed production dependencies; some packages may be removed by bundling. Electron and Chromium notices are included with the desktop runtime.\n\n${records.sort().join('\n\n' + '='.repeat(78) + '\n\n')}\n`);
 console.log(`Recorded notices for ${records.length} production packages.`);

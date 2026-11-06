@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DocumentStore, FileConflictError, atomicWrite } from './store';
 import type { ActionResult, AppCommand } from '../shared/types';
-import { MODERN_DARK } from '../shared/code-theme';
+import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 
 app.setName('Typora Replica');
@@ -29,7 +29,7 @@ const assetRoot = path.resolve(__dirname, '../dist');
 let quitting = false;
 let quitInProgress = false;
 const codeTheme = new VscodeThemeSync(() => publish());
-function workspaceView(id: string) { return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: store.preferences.codeTheme === 'vscode' ? codeTheme.current : MODERN_DARK }; }
+function workspaceView(id: string) { return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: store.preferences.codeTheme === 'vscode' ? codeTheme.current : store.preferences.codeTheme === 'github-dark' ? GITHUB_DARK : MODERN_DARK }; }
 function newBlankWindow() { const id = store.newWindow(); store.newDocument(id); return createWindow(id); }
 function relaunchCommand() { return [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(value => `"${value}"`).join(' ') + ' --new-window'; }
 
