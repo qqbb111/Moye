@@ -427,6 +427,7 @@ test('拖动时整张标签跟随鼠标并保留抓取位置，使用柔和占�
   try {
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1100, height: 720 }); window.showInactive(); });
     await setContent(page, '第一份'); await execute(page, 'new'); await setContent(page, '第二份'); await execute(page, 'new'); await setContent(page, '第三份');
+    await native.evaluate(window => window.focus()); await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     const ids = await page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id!));
     const first = page.locator(`.tab[data-id="${ids[0]}"]`); const original = (await first.boundingBox())!;
     const grab = { x: original.x + 35, y: original.y + 17 };
@@ -451,6 +452,7 @@ test('标签拖动可用 Esc 或丢失指针捕获取消，恢复布局并可继
   try {
     const native = await application.browserWindow(page); await native.evaluate(window => window.showInactive());
     await setContent(page, '第一份'); await execute(page, 'new'); await setContent(page, '第二份'); await execute(page, 'new'); await setContent(page, '第三份');
+    await native.evaluate(window => window.focus()); await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     const order = () => page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id)); const ids = await order();
     for (const cancel of ['escape', 'capture']) {
       const first = page.locator('.tab').first(), box = (await first.boundingBox())!;
