@@ -1,7 +1,7 @@
 {
   "name": "typora-replica",
   "productName": "墨页 Moye",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "保留 Markdown 原文的即时排版桌面编辑器",
   "main": "dist-electron/main.cjs",

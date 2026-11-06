@@ -26,7 +26,7 @@ details[open] > summary .tree-chevron { transform: rotate(90deg); }
 .table-toolbar .replica-icon { width: 14px; height: 14px; }
 .code-toolbar .code-copy .replica-icon { width: 16px; height: 16px; }
 .menu-check { display: inline-flex; align-items: center; justify-content: center; }
-#tabbar.drag-over { box-shadow: inset 0 -1px #0078d4; }
+#tabbar.drag-over { box-shadow: none; }
 
 /* Shared chrome and page rhythm. UI lettering stays neutral; prose uses WenKai. */
 :root {
@@ -200,6 +200,11 @@ dialog input[type=number], dialog select { border-radius: 6px; }
 .tab { min-width: 140px; max-width: 230px; border: 0; border-radius: 6px; padding: 0 7px 0 10px; position: relative; }
 .tab.active { border: 0; background: color-mix(in srgb, var(--ui-accent) 10%, var(--bg)); }
 .tab.active::after { content: ''; position: absolute; left: 13px; right: 13px; bottom: -6px; height: 2px; background: var(--ui-accent); border-radius: 2px; }
+.tab.dragging { position: fixed; z-index: 60; min-width: 0; max-width: none; flex: none; margin: 0; opacity: 1; pointer-events: none; background: color-mix(in srgb, var(--ui-accent) 12%, var(--chrome)); box-shadow: 0 8px 24px #0004, 0 0 0 1px color-mix(in srgb, var(--ui-accent) 35%, transparent); }
+.tab.dragging::after { display: none; }
+.tab-placeholder { flex: 0 0 auto; align-self: center; border-radius: 6px; background: color-mix(in srgb, var(--ui-accent) 7%, transparent); border: 1px solid color-mix(in srgb, var(--ui-accent) 27%, transparent); }
+.tab-placeholder.outside { opacity: .35; }
+body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-select: none !important; }
 .tab.active > .tab-file-icon { color: var(--ui-accent); }
 .tab-close { width: 19px; height: 19px; flex-basis: 19px; margin-left: 10px; }
 .tab .tab-close { opacity: 0; }

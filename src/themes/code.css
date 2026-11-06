@@ -22,8 +22,7 @@
 #code-theme-select { max-width: 210px; }
 #code-theme-status { margin: 0; line-height: 1.5; }
 .tab { position: relative; user-select: none; }
-.tab.dragging { opacity: .45; }
-.tab.drop-before::before,.tab.drop-after::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: #0078d4; pointer-events: none; z-index: 2; }
+.tab.drop-before::before,.tab.drop-after::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ui-accent); pointer-events: none; z-index: 2; }
 .tab.drop-before::before { left: 0; }
 .tab.drop-after::after { right: 0; }
 

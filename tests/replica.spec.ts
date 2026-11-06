@@ -422,6 +422,50 @@ test('Copilot 主题可从菜单和偏好设置选择，重启后仍保留', asy
   } finally { await currentApp.application.close(); }
 });
 
+test('拖动时整张标签跟随鼠标并保留抓取位置，使用柔和占位且不出现整栏蓝线', async () => {
+  const { application, page } = await launch();
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1100, height: 720 }); window.showInactive(); });
+    await setContent(page, '第一份'); await execute(page, 'new'); await setContent(page, '第二份'); await execute(page, 'new'); await setContent(page, '第三份');
+    const ids = await page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id!));
+    const first = page.locator(`.tab[data-id="${ids[0]}"]`); const original = (await first.boundingBox())!;
+    const grab = { x: original.x + 35, y: original.y + 17 };
+    await page.mouse.move(grab.x, grab.y); await page.mouse.down(); await page.mouse.move(grab.x + 70, grab.y + 3, { steps: 8 });
+    await expect(first).toHaveClass(/dragging/); await expect(first).toHaveCSS('opacity', '1');
+    const floating = (await first.boundingBox())!;
+    expect(Math.abs(floating.x - original.x - 70)).toBeLessThan(1); expect(Math.abs(floating.y - original.y - 3)).toBeLessThan(1); expect(Math.abs(floating.width - original.width)).toBeLessThan(1);
+    await expect(first.locator('.tab-file-icon')).toBeVisible(); await expect(first.locator('.tab-label')).toContainText('未命名 1'); await expect(first.locator('.tab-close')).toBeVisible();
+    await expect(page.locator('.tab-placeholder')).toBeVisible(); await expect(page.locator('#tabbar')).toHaveCSS('box-shadow', 'none');
+    await page.mouse.move(grab.x + 150, grab.y + 5, { steps: 8 }); const moved = (await first.boundingBox())!;
+    expect(Math.abs(moved.x - floating.x - 80)).toBeLessThan(1); expect(Math.abs(moved.y - floating.y - 2)).toBeLessThan(1);
+    const strip = (await page.locator('#tabs').boundingBox())!; await page.mouse.move(strip.x + strip.width - 40, strip.y + strip.height / 2, { steps: 15 }); await page.mouse.up();
+    await expect.poll(() => page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id))).toEqual([ids[1], ids[2], ids[0]]);
+    await expect(page.locator('.tab-placeholder,.tab.dragging')).toHaveCount(0); expect(await content(page)).toBe('第三份'); await expect(page.locator('.tab.active')).toHaveAttribute('data-id', ids[2]);
+  } finally { await page.mouse.up().catch(() => {}); await application.close(); }
+});
+
+test('标签拖动可用 Esc 或丢失指针捕获取消，恢复布局并可继续点击切换', async () => {
+  const { application, page } = await launch();
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(window => window.showInactive());
+    await setContent(page, '第一份'); await execute(page, 'new'); await setContent(page, '第二份'); await execute(page, 'new'); await setContent(page, '第三份');
+    const order = () => page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id)); const ids = await order();
+    for (const cancel of ['escape', 'capture']) {
+      const first = page.locator('.tab').first(), box = (await first.boundingBox())!;
+      await first.evaluate(tab => tab.addEventListener('pointerdown', event => { (tab as HTMLElement).dataset.testPointer = String((event as PointerEvent).pointerId); }, { once: true }));
+      await page.mouse.move(box.x + 30, box.y + 16); await page.mouse.down(); await page.mouse.move(box.x + 200, box.y + 18, { steps: 8 }); await expect(first).toHaveClass(/dragging/);
+      if (cancel === 'escape') await page.keyboard.press('Escape'); else {
+        await first.evaluate(tab => tab.releasePointerCapture(Number((tab as HTMLElement).dataset.testPointer)));
+        // Chromium delivers pending capture changes with the next pointer event.
+        await page.mouse.move(box.x + 201, box.y + 18);
+      }
+      await expect(page.locator('.tab-placeholder,.tab.dragging')).toHaveCount(0); await page.mouse.up();
+      expect(await order()).toEqual(ids); expect(await content(page)).toBe('第三份'); await expect(first).not.toHaveCSS('position', 'fixed');
+    }
+    await page.locator('.tab').first().click(); expect(await content(page)).toBe('第一份');
+  } finally { await page.mouse.up().catch(() => {}); await application.close(); }
+});
+
 test('鼠标左右拖动标签保持当前编辑和撤销，重启恢复排序', async () => {
   let app = await launch();
   try {
