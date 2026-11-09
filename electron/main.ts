@@ -97,7 +97,7 @@ function createWindow(id: string = store.newWindow()) {
       } catch (error) { closing.delete(window.id); notify(window, `暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`); }
     })();
   });
-  window.on('closed', () => { pdfPreviews.release(id); windows.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
+  window.on('closed', () => { pdfPreviews.dispose(id); windows.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
   window.webContents.on('render-process-gone', (_event, details) => { console.error('Renderer stopped:', details.reason); void store.persist().catch(() => {}); });
   if (devUrl) void window.loadURL(devUrl);
   else void window.loadURL('replica://app/index.html');
@@ -113,8 +113,12 @@ async function openFile(windowId: string, file: string) {
   if (result.windowId !== windowId) notify(windows.get(windowId)!, '这份文件已经在另一个窗口打开，已切换到那个窗口。');
 }
 function registerIpc() {
-  ipcMain.handle('pdf:preview', async (event, documentId: string, html: string, options) => {
-    try { const owner = windowIdOf(event); requireOwned(owner, documentId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('打印文档过大'); return await pdfPreviews.preview(owner, { ...store.documents.get(documentId)! }, html, validatePrintOptions(options)); }
+  ipcMain.handle('pdf:preview', async (event, documentId: string, html: string, options, requestId?: string) => {
+    try {
+      const owner = windowIdOf(event); requireOwned(owner, documentId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('打印文档过大');
+      if (requestId !== undefined && (typeof requestId !== 'string' || !/^[a-f0-9-]{36}$/i.test(requestId))) throw new Error('打印请求不正确');
+      return await pdfPreviews.preview(owner, { ...store.documents.get(documentId)! }, html, validatePrintOptions(options), requestId ? bytes => { if (!event.sender.isDestroyed()) event.sender.send('pdf:first-page', { requestId, documentId, bytes }); } : undefined);
+    }
     catch (error) { return { ok: false, message: (error as Error).message }; }
   });
   ipcMain.handle('pdf:release', event => { pdfPreviews.release(windowIdOf(event)); });

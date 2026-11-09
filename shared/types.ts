@@ -1,5 +1,5 @@
 import type { CodeThemeSnapshot } from './code-theme';
-import type { PrintOptions, PrintPreferences, PdfPreviewResult } from './print';
+import type { PrintOptions, PrintPreferences, PdfPreviewResult, PdfFirstPage } from './print';
 export type SaveStatus = 'saved' | 'draft' | 'saving' | 'error' | 'conflict';
 export interface DocumentView {
   id: string;
@@ -53,7 +53,8 @@ export interface RypotaBridge {
   openFolderFile(path: string): Promise<ActionResult>;
   insertImage(id: string, data?: { bytes: number[]; name: string }): Promise<{ url?: string; message?: string }>;
   exportDocument(id: string, format: 'html' | 'pdf', html: string): Promise<ActionResult>;
-  previewPdf(id: string, html: string, options: PrintOptions): Promise<PdfPreviewResult>;
+  previewPdf(id: string, html: string, options: PrintOptions, requestId?: string): Promise<PdfPreviewResult>;
+  onPdfFirstPage(listener: (page: PdfFirstPage) => void): () => void;
   savePdf(previewId: string, fonts?: PrintPreferences['fonts']): Promise<ActionResult>;
   releasePdf(): Promise<void>;
   fullscreen(): void;

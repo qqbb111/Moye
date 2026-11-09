@@ -43,7 +43,7 @@
   color: var(--code-foreground); border-radius: 5px; font: 12px/1.4 var(--ui-font);
 }
 :root[data-theme] .code-toolbar input:hover { background: #ffffff0a; }
-:root[data-theme] .code-toolbar input:focus { outline: 1px solid var(--link); background: #ffffff0a; }
+:root[data-theme] .code-toolbar input:focus { outline: 1px solid var(--ui-accent); background: #ffffff0a; }
 .code-lines { flex: 1; font-variant-numeric: tabular-nums; color: var(--code-foreground); opacity: .6; }
 :root[data-theme] .code-toolbar .code-copy,
 :root[data-theme] .code-toolbar .code-wrap {

@@ -27,7 +27,9 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1250, height: 900 }); window.showInactive(); });
     const raw = '# 打印检查\n\n## 长代码\n\n```cpp\n' + Array.from({ length: 180 }, (_, i) => i === 49 ? '' : `    int code_${String(i).padStart(4, '0')} = ${i}; // PRINT_${String(i).padStart(4, '0')} 中文注释${i === 60 ? ' long_identifier_'.repeat(16) : ''}`).join('\n') + '\n```\n\n| 算法 | 复杂度 |\n| --- | --- |\n| BFS | O(n+m) |\n\n$$a^2+b^2=c^2$$\n\nPRINT_END';
     await setContent(page, raw); await execute(page, 'export-pdf');
+    await expect(page.locator('#print-close')).not.toBeFocused(); await expect(page.locator('#print-close [data-icon=close]')).toHaveCount(1);
     await expect(page.locator('#print-preview')).toBeVisible(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.print-settings > p:not([hidden])')).toHaveCount(0);
     await expect(page.locator('#print-layout')).toHaveValue('portrait'); await expect(page.locator('#print-color')).toHaveValue('mono'); await expect(page.locator('#print-font')).toHaveValue('10'); await expect(page.locator('#print-lines')).toBeChecked();
     await page.locator('#print-font').fill('10.5'); await page.locator('#print-layout').selectOption('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9');
     await page.locator('#print-font').fill('9.5'); await page.locator('#print-color').selectOption('light'); await page.locator('#print-color').selectOption('mono'); await page.locator('#print-color').selectOption('light'); await page.locator('#print-lines').uncheck();
@@ -51,17 +53,59 @@ test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关�
   const { application, page } = await launch();
   try {
     const id = await page.evaluate(async () => (await window.rypota.bootstrap()).activeId!);
+    await application.evaluate(({ app }) => { (globalThis as any).__pdfWindows = 0; app.on('browser-window-created', () => { (globalThis as any).__pdfWindows++; }); });
     const html = '<!doctype html><html><head></head><body>PRINT JOB</body></html>';
     const options = { layout: 'portrait' as const, color: 'mono' as const, codeFontPt: 10, lineNumbers: true };
     const result = await page.evaluate(async ({ id, html, options }) => Promise.all([window.rypota.previewPdf(id, html, options), window.rypota.previewPdf(id, html, options)]), { id, html, options });
     expect(result[0].ok).toBe(false); expect(result[1].ok).toBe(true); if (!result[1].ok) throw new Error('Latest preview was not retained');
-    const token = result[1].previewId;
+    let token = result[1].previewId;
+    const beforeCache = await application.evaluate(() => (globalThis as any).__pdfWindows);
+    const beforeBytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__replicaTest; return api.pdfPreviews.get([...api.windows.keys()][0], token).bytes.toString('base64'); }, token);
+    await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
+    const cached = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options }); if (!cached.ok) throw new Error('Cached preview failed');
+    expect(cached.previewId).not.toBe(token); token = cached.previewId;
+    expect(Buffer.from(cached.bytes).toString('base64')).toBe(beforeBytes); expect(await application.evaluate(() => (globalThis as any).__pdfWindows)).toBe(beforeCache);
+    const changed = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html.replace('PRINT JOB', 'CHANGED JOB'), options), { id, html, options }); expect(changed.ok).toBe(true);
+    if (changed.ok) token = changed.previewId;
+    expect(await application.evaluate(() => (globalThis as any).__pdfWindows)).toBe(beforeCache + 1);
     const invalid = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, { ...options, codeFontPt: 0 }), { id, html, options }); expect(invalid.ok).toBe(false);
     await execute(page, 'new-window'); await expect.poll(() => application.windows().length).toBe(2); const other = application.windows().find(window => window !== page)!; await other.locator('.markdown-editor').waitFor();
     expect((await other.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
     expect((await other.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options })).ok).toBe(false);
     const broken = await page.evaluate(({ id, options }) => window.rypota.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options }); expect(broken.ok).toBe(false); if (!broken.ok) expect(broken.message).toContain('图片解码失败');
     await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
+    const owner = await page.evaluate(async () => (await window.rypota.bootstrap()).windowId);
+    const native = await application.browserWindow(page); await native.evaluate(window => window.close());
+    await expect.poll(() => application.evaluate((_electron, owner) => !(globalThis as any).__replicaTest.pdfPreviews.recent.has(owner), owner)).toBe(true);
+  } finally { await application.close(); }
+});
+
+test('长文先显示实际首页，整份完成前不可保存，接收旧请求的首页不改变当前预览', async () => {
+  const { application, page, directory } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  try {
+    await application.evaluate(({ app }) => {
+      (globalThis as any).__holdFull = true;
+      app.on('browser-window-created', (_event, window) => {
+        const print = window.webContents.printToPDF.bind(window.webContents);
+        window.webContents.printToPDF = async options => {
+          if (!options?.pageRanges && (globalThis as any).__holdFull) await new Promise<void>(resolve => { (globalThis as any).__releaseFull = resolve; });
+          const bytes = await print(options); if (options?.pageRanges === '1') (globalThis as any).__firstPage = bytes.toString('base64'); return bytes;
+        };
+      });
+    });
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1250, height: 900 }); window.showInactive(); });
+    const raw = '# 分阶段打印\n\n```cpp\n' + Array.from({ length: 180 }, (_, i) => `int line_${String(i).padStart(3, '0')} = ${i}; // 中文注释`).join('\n') + '\n```\n\nPRINT_END';
+    await setContent(page, raw); await execute(page, 'export-pdf'); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('#print-save')).toBeDisabled(); await expect(page.locator('#print-preview')).not.toHaveAttribute('data-preview-id');
+    const first = await application.evaluate(() => (globalThis as any).__firstPage); await fs.writeFile(path.join(directory, 'first-page.pdf'), Buffer.from(first, 'base64'));
+    await application.evaluate(() => { (globalThis as any).__holdFull = false; (globalThis as any).__releaseFull(); });
+    await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); expect(Number.parseInt(await page.locator('#print-page-count').innerText())).toBeGreaterThan(1);
+    const token = await page.locator('#print-preview').getAttribute('data-preview-id'); const count = await page.locator('.print-page').count();
+    await application.evaluate(({ }, first) => {
+      const api = (globalThis as any).__replicaTest; api.windows.values().next().value.webContents.send('pdf:first-page', { requestId: '00000000-0000-0000-0000-000000000000', documentId: 'wrong-document', bytes: new Uint8Array(Buffer.from(first, 'base64')) });
+    }, first);
+    await expect(page.locator('.print-page')).toHaveCount(count); await expect(page.locator('#print-preview')).toHaveAttribute('data-preview-id', token!);
+    const destination = path.join(directory, 'complete.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible(); expect(await content(page)).toBe(raw); expect(errors).toEqual([]);
   } finally { await application.close(); }
 });
 
@@ -177,6 +221,7 @@ test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保�
     await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(1); await expect(app.page.locator('#sidebar-content')).toContainText('网络通信');
     await app.page.getByRole('searchbox', { name: '筛选侧栏' }).press('Escape'); await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(3);
     const separator = app.page.getByRole('separator', { name: '调整侧栏宽度' }); const box = (await separator.boundingBox())!;
+    await separator.hover(); await expect(separator).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)'); expect(await separator.evaluate(element => getComputedStyle(element, '::after').width)).toBe('1px');
     await app.page.mouse.move(box.x + box.width / 2, box.y + 90); await app.page.mouse.down(); await app.page.mouse.move(box.x + box.width / 2 + 54, box.y + 90, { steps: 8 }); await app.page.mouse.up();
     await expect(separator).toHaveAttribute('aria-valuenow', '310'); await separator.focus(); await app.page.keyboard.press('ArrowRight'); await expect(separator).toHaveAttribute('aria-valuenow', '320');
     await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click(); await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click();
@@ -221,7 +266,8 @@ test('原文保真、光标语法显隐、排版和真实快捷键', async () =>
 test('图片及块组件之后点击正文按实际坐标定位，滚动和主题切换后仍可编辑中间', async () => {
   const { application, page } = await launch();
   try {
-    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 900 }); window.showInactive(); });
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 900 }); window.show(); window.focus(); });
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     const image = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620"><rect width="900" height="620" fill="#ddeeff"/></svg>').toString('base64');
     for (const theme of ['light', 'dark', 'copilot', 'workbuddy']) {
       await execute(page, theme);
@@ -402,10 +448,15 @@ test('关闭草稿和强制结束后的恢复', async () => {
 test('文件树、相对图片、HTML 和 PDF 导出', async () => {
   const { application, page, directory } = await launch(); const folder = path.join(directory, '笔记'); await fs.mkdir(folder); const file = path.join(folder, '示例.md'); await fs.writeFile(file, '# 导出测试\n\n![本地图片](image.png)\n\n正文 **加粗**。\n'); await fs.copyFile(path.join(root, 'assets/rypota.png'), path.join(folder, 'image.png'));
   try {
+    await application.evaluate(({ app }) => { (globalThis as any).__imagePrintWindows = 0; app.on('browser-window-created', () => { (globalThis as any).__imagePrintWindows++; }); });
     await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder); await execute(page, 'folder'); await page.locator('#sidebar-content').getByRole('button', { name: '示例.md' }).click(); await expect(current(page).locator('.md-h1')).toContainText('导出测试');
     const image = current(page).locator('.md-image img'); await expect.poll(() => image.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const html = path.join(directory, '导出.html'); await chooseSave(application, html); await execute(page, 'export-html'); await expect.poll(() => fs.readFile(html, 'utf8').catch(() => '')).toContain('<strong>加粗</strong>'); expect(await fs.readFile(html, 'utf8')).toContain('data:image/png;base64,');
     const pdf = path.join(directory, '导出.pdf'); await chooseSave(application, pdf); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); await page.locator('#print-save').click(); await expect.poll(() => fs.readFile(pdf).then(bytes => bytes.subarray(0, 4).toString()).catch(() => '')).toBe('%PDF');
+    const created = await application.evaluate(() => (globalThis as any).__imagePrintWindows), previous = await fs.readFile(pdf);
+    await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(folder, 'image.png')); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    expect(await application.evaluate(() => (globalThis as any).__imagePrintWindows)).toBe(created + 1);
+    await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible(); expect(previous.equals(await fs.readFile(pdf))).toBe(false);
   } finally { await application.close(); }
 });
 

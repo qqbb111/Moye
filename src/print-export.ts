@@ -37,7 +37,16 @@ export async function printHTML(source: string, title: string, host: Host, optio
         const line = document.createElement('span'); line.className = 'print-code-line'; line.dataset.line = String(index + 1);
         let indent = 0; for (const character of /^\s*/.exec(text)![0]) indent += character === '\t' ? 4 - indent % 4 : 1;
         line.style.setProperty('--indent', `${Math.min(24, indent + 2)}ch`);
+        // Adjacent syntax tokens often share the same print appearance, especially
+        // in monochrome. Keep one text run instead of thousands of identical spans.
+        const runs: { content: string; color: string; fontStyle: number }[] = [];
         for (const token of tokens?.[index] ?? [{ content: text, color: '#111111', fontStyle: 0 }]) {
+          const color = token.color ?? '#111111', fontStyle = token.fontStyle ?? 0, previous = runs.at(-1);
+          if (previous && previous.color === color && previous.fontStyle === fontStyle) previous.content += token.content;
+          else runs.push({ content: token.content, color, fontStyle });
+        }
+        for (const token of runs) {
+          if (token.color === '#111111' && !token.fontStyle) { line.append(document.createTextNode(token.content)); continue; }
           const span = document.createElement('span'); span.textContent = token.content; span.style.color = token.color ?? '#111111';
           if ((token.fontStyle ?? 0) & 1) span.style.fontStyle = 'italic'; if ((token.fontStyle ?? 0) & 2) span.style.fontWeight = '700'; line.append(span);
         }
