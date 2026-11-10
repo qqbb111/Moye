@@ -53,7 +53,7 @@
 }
 :root[data-theme] .code-toolbar button:hover,
 :root[data-theme] .code-toolbar button:focus-visible { background: #ffffff13; opacity: 1; }
-:root[data-theme] .code-toolbar .code-wrap[aria-pressed='true'] { background: #7fbbdf26; color: #b3dcf5; opacity: 1; }
+:root[data-theme] .code-toolbar .code-wrap[aria-pressed='true'] { background: color-mix(in srgb, var(--ui-accent) 15%, transparent); color: var(--ui-accent); opacity: 1; }
 :root[data-theme] .code-toolbar .code-copy[data-copied='true'] { color: #a9d7b4; opacity: 1; }
 .code-content { min-width: 0; }
 :root[data-theme] .code-content .cm-scroller {
@@ -69,7 +69,7 @@
 }
 :root[data-theme] .code-content .cm-line { min-height: 1.7em; line-height: 1.7; }
 :root[data-theme] .code-content .cm-cursor { border-left-color: var(--code-foreground) !important; }
-:root[data-theme] .code-content .cm-selectionBackground { background: #75b9eb40 !important; }
+:root[data-theme] .code-content .cm-selectionBackground { background: color-mix(in srgb, var(--ui-accent) 26%, transparent) !important; }
 :root[data-theme] .code-content .cm-scroller::-webkit-scrollbar { height: 9px; }
 :root[data-theme] .code-content .cm-scroller::-webkit-scrollbar-thumb { border: 2px solid var(--code-background); border-radius: 8px; background: #8e98a553; }
 :root[data-theme] .md-inline-code { font-size: .88em; padding: .12em .32em; border-radius: 4px; }

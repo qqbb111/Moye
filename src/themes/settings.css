@@ -2,20 +2,33 @@
 #preferences[open] { display: flex; flex-direction: column; }
 .settings-header { display: flex; align-items: center; justify-content: space-between; padding: 22px 26px 14px; flex: 0 0 auto; }
 .settings-header h2 { margin: 0; font-size: 20px; font-weight: 600; }
-#settings-close { width: 30px; height: 30px; padding: 6px; border: 0; background: transparent; }
+#settings-close { width: var(--ui-button-height); height: var(--ui-button-height); padding: 8px; border: 0; background: transparent; }
 .settings-tabs { display: flex; gap: 5px; padding: 0 24px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; flex: 0 0 auto; }
 .settings-tabs button { border: 0; background: transparent; padding: 7px 12px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
 .settings-tabs [aria-selected=true] { background: var(--ui-accent-soft); color: var(--ui-accent); }
 #settings-panel { min-height: 0; flex: 1; overflow: auto; padding: 12px 26px 24px; outline: none; }
 #settings-general { max-width: 660px; margin: 0 auto; }
-#preferences #settings-general label { min-height: 45px; font-size: 13px; }
-#preferences #settings-general select { width: 230px; max-width: 55%; }
-#preferences #code-theme-status { margin: 6px 0 12px; }
+.setting-row { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--border); }
+#preferences .setting-row label { display: block; margin: 0; padding: 12px 0; font-size: 13px; line-height: 1.6; cursor: pointer; }
+#preferences .setting-row select, #preferences .setting-row input[type=number] { width: 230px; max-width: 55%; height: var(--ui-control-height); padding: 0 10px; border: 1px solid var(--border); background: var(--surface); font: 13px var(--ui-font); }
+#preferences .setting-row input[type=number] { width: 80px; }
+.setting-label { display: flex; align-items: center; gap: 6px; }
+.setting-control { width: 230px; max-width: 55%; display: flex; align-items: center; gap: 6px; }
+#preferences .setting-control select { flex: 1; min-width: 0; width: 100%; max-width: none; }
+#code-theme-refresh, .setting-info { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); }
+#code-theme-refresh { width: 30px; height: var(--ui-control-height); flex: 0 0 30px; }
+.setting-info { width: 24px; height: 24px; }
+#preferences #code-theme-status { margin: 6px 0 10px; text-align: right; color: var(--muted); font-size: 11px; }
+#preferences input[role=switch] { appearance: none; flex: 0 0 32px; width: 32px; height: 18px; padding: 0; margin: 0; border: 1px solid color-mix(in srgb, var(--muted) 55%, transparent); border-radius: 10px; background: var(--surface); position: relative; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+#preferences input[role=switch]::after { content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform 120ms ease, background-color 120ms ease; }
+#preferences input[role=switch]:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
+#preferences input[role=switch]:checked::after { transform: translateX(14px); background: var(--bg); }
+#format-save-help { position: fixed; inset: auto; width: 278px; max-width: calc(100vw - 32px); margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font: 12px/1.7 var(--ui-font); box-shadow: 0 6px 20px #0003; }
 #settings-shortcut-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 #shortcut-search { width: 60%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .settings-command { display: flex; align-items: center; gap: 9px; min-height: 49px; border-bottom: 1px solid var(--border); }
 #preferences .settings-action { flex: 1; min-width: 0; text-align: left; padding: 10px 8px; font-size: 13px; border: 0; background: transparent; }
-#preferences .shortcut-key { padding: 5px 9px; min-width: 125px; font-size: 12px; color: var(--muted); background: var(--surface); border-radius: 5px; }
+#preferences .shortcut-key { padding: 5px 9px; min-width: 148px; font-size: 12px; color: var(--muted); background: var(--surface); border-radius: 5px; }
 #preferences .shortcut-key.recording { color: var(--ui-accent); border-color: var(--ui-accent); }
 #preferences .shortcut-clear, #preferences .shortcut-reset { width: 26px; height: 26px; padding: 5px; border: 0; background: transparent; color: var(--muted); }
 #preferences .settings-command button:hover { background: var(--hover); }
@@ -29,8 +42,19 @@
   .settings-tabs { padding-left: 12px; padding-right: 12px; }
   #settings-panel { padding: 10px 14px 18px; }
   .settings-command { gap: 5px; }
-  #preferences .shortcut-key { min-width: 105px; }
+  #preferences .shortcut-key { min-width: 112px; font-size: 11px; }
 }
 
 #preferences .shortcut-clear, #preferences .shortcut-reset { opacity: 0; }
 #preferences .settings-command:hover .shortcut-clear, #preferences .settings-command:hover .shortcut-reset, #preferences .settings-command:focus-within .shortcut-clear, #preferences .settings-command:focus-within .shortcut-reset { opacity: 1; }
+
+.settings-action:focus-visible, .shortcut-key:focus-visible { outline-offset: -2px; }
+#settings-panel:focus-visible { outline: 1px solid var(--ui-accent); outline-offset: -3px; }
+#preferences .settings-footer { box-sizing: border-box; }
+@media (max-width: 700px) {
+  .settings-header { padding: 18px 16px 12px; }
+  #preferences .settings-footer { padding-left: 14px; padding-right: 14px; }
+  .setting-row { gap: 12px; }
+  #preferences .setting-row label { font-size: 12px; }
+}
+@media (forced-colors: active) { #preferences input[role=switch] { appearance: auto; } #preferences input[role=switch]::after { display: none; } }

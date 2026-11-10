@@ -29,7 +29,7 @@ export class PrintPreview {
     this.dialog.id = 'print-preview'; this.dialog.setAttribute('aria-label', '打印预览'); this.dialog.tabIndex = -1;
     this.dialog.innerHTML = `<header class="print-header"><div><strong>打印预览</strong><span id="print-document"></span></div><button id="print-close" aria-label="关闭打印预览">${icon('close')}</button></header>
       <div class="print-body"><aside class="print-settings"><label>纸张与版式<select id="print-layout"><option value="portrait">A4 纵向 · 单栏</option><option value="landscape-two-column">A4 横向 · 双栏</option></select></label><label>代码配色<select id="print-color"><option value="mono">黑白省墨</option><option value="light">浅色语法高亮</option></select></label><label>代码字号 <span class="print-unit">pt</span><input id="print-font" type="number" min="8" max="12" step="0.5"></label><label class="print-checkbox"><input id="print-lines" type="checkbox">显示代码行号</label><div id="print-stale" hidden>原文已更新<button id="print-refresh">刷新预览</button></div><button id="print-save" disabled>保存 PDF…</button><p id="print-status" role="alert" hidden></p></aside>
-      <section class="print-preview-area"><div class="print-toolbar"><div class="print-page-info"><span id="print-page-count">— 页</span><span id="print-busy" aria-label="正在排版" role="status" hidden></span></div><label>缩放<select id="print-zoom" aria-label="预览缩放"><option value="fit">适合宽度</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option></select></label></div><div id="print-pages" tabindex="0" aria-label="PDF 页面预览"></div></section></div>`;
+      <section class="print-preview-area"><div class="print-toolbar"><div class="print-page-info"><span id="print-page-count"></span><span id="print-busy" aria-label="正在排版" role="status" hidden></span></div><label>缩放<select id="print-zoom" aria-label="预览缩放"><option value="fit">适合宽度</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option></select></label></div><div id="print-pages" tabindex="0" aria-label="PDF 页面预览"></div></section></div>`;
     document.body.append(this.dialog);
     window.rypota.onPdfFirstPage(page => {
       const request = this.request;
@@ -58,7 +58,7 @@ export class PrintPreview {
     this.get<HTMLSelectElement>('#print-layout').value = options.layout; this.get<HTMLSelectElement>('#print-color').value = options.color;
     this.get<HTMLInputElement>('#print-font').value = String(options.codeFontPt); this.get<HTMLInputElement>('#print-lines').checked = options.lineNumbers;
     this.worker = new pdfjs.PDFWorker(); void this.worker.promise.catch(() => {});
-    this.get('#print-document').textContent = document.title; this.get('#print-stale').hidden = true; this.get('#print-page-count').textContent = '— 页'; this.dialog.showModal(); this.dialog.focus({ preventScroll: true }); this.schedule(0);
+    this.get('#print-document').textContent = document.title; this.get('#print-stale').hidden = true; this.get('#print-page-count').textContent = ''; this.dialog.showModal(); this.dialog.focus({ preventScroll: true }); this.schedule(0);
   }
   observe(document?: DocumentView) { if (this.dialog.open) { this.get('#print-stale').hidden = !!document && document.revision === this.snapshot.revision && document.title === this.snapshot.title; this.get<HTMLButtonElement>('#print-refresh').disabled = !document; } }
   documentId() { return this.snapshot?.id; }

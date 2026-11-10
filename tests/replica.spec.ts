@@ -22,6 +22,64 @@ async function execute(page: Page, command: string) { await page.evaluate(comman
 async function settingsAction(page: Page, section: string, action: string) { await execute(page, 'preferences'); await page.getByRole('tab', { name: section, exact: true }).click(); await page.locator(`[data-settings-command="${action}"]`).click(); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
+test('启动、新建和打开后可立即输入，标签方向键可连续导航并保留各自正文', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(w => { w.show(); w.focus(); });
+    await page.keyboard.insertText('启动即写'); expect(await content(page)).toBe('启动即写');
+    await execute(page, 'new'); await page.keyboard.insertText('新建即写'); expect(await content(page)).toBe('新建即写');
+    await page.locator('#add-tab').click(); await page.keyboard.insertText('点击新建即写'); expect(await content(page)).toBe('点击新建即写');
+    await page.locator('.tab.active').focus(); await page.keyboard.press('ArrowLeft'); await expect(page.locator('.tab.active')).toBeFocused(); expect(await content(page)).toBe('新建即写');
+    await page.keyboard.press('ArrowLeft'); await expect(page.locator('.tab.active')).toBeFocused(); expect(await content(page)).toBe('启动即写');
+    await page.keyboard.press('End'); await expect(page.locator('.tab.active')).toBeFocused(); expect(await content(page)).toBe('点击新建即写');
+    const file = path.join(directory, '打开.md'); await fs.writeFile(file, '原文');
+    await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, file);
+    await execute(page, 'open'); await page.keyboard.insertText('直接写'); expect(await content(page)).toContain('直接写');
+    await execute(page, 'previous-tab'); await page.keyboard.insertText('继续'); expect(await content(page)).toBe('点击新建即写继续');
+  } finally { await application.close(); }
+});
+
+test('快捷键名称仅录制绑定，说明按需显示且设置控件可通过键盘访问', async () => {
+  const { application, page } = await launch();
+  try {
+    const raw = '保留选区和正文'; await setContent(page, raw);
+    await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 4 } }); e.focus(); });
+    await execute(page, 'shortcuts'); await page.getByRole('button', { name: '更改关闭文档绑定', exact: true }).click();
+    await expect(page.locator('#preferences')).toBeVisible(); expect(await content(page)).toBe(raw);
+    await expect(page.locator('[data-shortcut-id="close-tab"]')).toHaveClass(/recording/); await page.keyboard.press('Escape');
+    await expect(page.locator('#preferences')).toBeVisible(); await expect(page.locator('[data-shortcut-id="close-tab"]')).toBeFocused();
+    await page.getByRole('tab', { name: '常规', exact: true }).click();
+    await expect(page.locator('#code-theme-refresh')).toBeHidden(); await page.locator('#code-theme-select').selectOption('vscode'); await expect(page.locator('#code-theme-refresh')).toBeVisible();
+    await page.locator('#code-theme-select').selectOption('github-dark'); await expect(page.locator('#code-theme-refresh')).toBeHidden();
+    await page.getByRole('button', { name: '了解中文排版整理' }).focus(); await page.keyboard.press('Enter'); await expect(page.getByRole('tooltip')).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(page.getByRole('tooltip')).toBeHidden(); await expect(page.locator('#preferences')).toBeVisible();
+    const toggle = page.getByRole('switch', { name: '保存前整理中文排版', exact: true }); await toggle.focus(); await page.keyboard.press('Space'); await expect(toggle).toBeChecked();
+    await page.locator('#preferences-apply').click(); await expect(page.locator('#preferences')).toBeHidden();
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.formatOnSave)).toBe(true);
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
+test('文件侧栏只展示当前上下文，快速打开按路径区分同名文件并支持点击外部关闭', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const first = path.join(directory, '课程', '笔记.md'), second = path.join(directory, '竞赛', '笔记.md');
+    for (const file of [first, second]) { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, file === first ? '# 课程笔记' : '# 竞赛笔记'); }
+    await application.evaluate(({ dialog }, files) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files }); }, [first, second]); await execute(page, 'open');
+    await execute(page, 'files'); await expect(page.locator('#sidebar-content [aria-current=page]')).toHaveText('笔记.md');
+    await expect(page.locator('.sidebar-folder-action')).toBeVisible();
+    await page.locator('#sidebar-filter').fill('不存在'); await expect(page.locator('#sidebar-content')).toContainText('没有匹配的文件');
+    await execute(page, 'quick-open'); await page.locator('#quick-input').fill('笔记'); await expect(page.locator('.quick-result')).toHaveCount(2);
+    await expect(page.locator('.quick-result small')).toHaveText([path.dirname(first), path.dirname(second)]); await expect(page.locator('.quick-current')).toHaveCount(1);
+    await page.locator('#quick-input').fill('课程'); await page.keyboard.press('Enter'); expect(await content(page)).toBe('# 课程笔记');
+    await execute(page, 'quick-open'); await page.locator('.titlebar').click({ position: { x: 8, y: 8 }, force: true }); await expect(page.locator('#quick-open')).toBeHidden();
+    await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, path.dirname(first));
+    await page.locator('#sidebar-filter').fill(''); await page.locator('.sidebar-folder-action').click();
+    await expect(page.locator('#folder-name')).toHaveText('课程'); await expect(page.locator('#sidebar-content .sidebar-row')).toHaveCount(1);
+    await expect(page.locator('#sidebar-content [aria-current=page]')).toHaveText('笔记.md'); expect(await content(page)).toBe('# 课程笔记');
+  } finally { await application.close(); }
+});
+
 test('更新退出参数走正常保存流程，多窗口草稿在再次启动后仍可恢复', async () => {
   const first = await launch(); let restored: Awaited<ReturnType<typeof launch>> | undefined;
   try {
@@ -388,7 +446,7 @@ test('快速打开去重并支持方向键选择和路径搜索，中文组合�
     await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('01-算法'); await expect(page.locator('#quick-results button')).toHaveCount(1);
     await page.locator('#quick-input').evaluate(input => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))); await expect(page.locator('#quick-open')).toBeVisible();
     await page.keyboard.press('Enter'); await expect(page.locator('.tab.active .tab-label')).toContainText('01-算法.md');
-    await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('不会存在的标题'); await expect(page.locator('.quick-empty')).toContainText('没有找到'); await page.keyboard.press('Escape'); await expect(page.locator('#quick-open')).not.toBeVisible();
+    await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('不会存在的标题'); await expect(page.locator('.quick-empty')).toHaveText('没有匹配的文件'); await page.keyboard.press('Escape'); await expect(page.locator('#quick-open')).not.toBeVisible();
   } finally { await application.close(); }
 });
 
