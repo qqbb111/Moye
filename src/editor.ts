@@ -24,7 +24,7 @@ function completeEmoji(context: CompletionContext) {
   return { from: match.from, options: Object.entries(emoji).map(([name, value]) => ({ label: `:${name}:`, detail: value, apply: `:${name}:`, type: 'text' })), validFor: /^:[a-z_0-9+-]*$/ };
 }
 export const sourceField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(sourceEffect)) value = effect.value; return value; } });
-export type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void; workbuddy?: () => boolean; githubDark?: () => boolean };
+export type Host = { id: string; media: (url: string) => string; link: (url: string) => void; changed: (value: string) => void; codeWrap?: () => boolean; setCodeWrap?: (value: boolean) => void; workbuddy?: () => boolean; githubDark?: () => boolean; highlightWithEquals?: () => boolean };
 
 // Continuation lines keep a little more indent than the original code line.
 const hangingCodeIndent = EditorView.decorations.compute(['doc'], state => {
@@ -148,7 +148,7 @@ class BlockWidget extends WidgetType {
     };
     const languageConfig = new Compartment(); const gutterConfig = new Compartment(); let numbered = !!ctx.host.workbuddy?.();
     let github: ReturnType<typeof attachGithubHighlighting>;
-    const extensions: Extension[] = [history(), drawSelection(), githubTokens, syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), gutterConfig.of(numbered ? lineNumbers() : []), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Alt-z', run: toggleWrap }, { key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); github?.refresh(); commit(update.state.doc.toString()); } })];
+    const extensions: Extension[] = [history(), drawSelection(), githubTokens, syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), gutterConfig.of(numbered ? lineNumbers() : []), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); github?.refresh(); commit(update.state.doc.toString()); } })];
     const code = new EditorView({ state: EditorState.create({ doc: ctx.node.value ?? '', extensions }), parent: content }); widgetEditors.set(root, code);
     github = attachGithubHighlighting(code, () => language.value);
     const setAppearance = (workbuddy: boolean, githubDark: boolean) => {
@@ -419,6 +419,7 @@ function smartEnter(view: EditorView): boolean {
 }
 export class MarkdownEditor {
   readonly view: EditorView;
+  private modeSequence = 0;
   constructor(parent: HTMLElement, content: string, readonly host: Host) {
     let compositionSequence = 0;
     const finishComposition = (view: EditorView, sequence: number) => { requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -433,13 +434,7 @@ export class MarkdownEditor {
         if (transaction.docChanged || transaction.selection || transaction.effects.length) return { ast, decorations: previewDecorations(transaction.state, ast, host) }; return value; },
       provide: field => EditorView.decorations.from(field, value => value.decorations),
     });
-    const actions: Record<string, string> = { 'Mod-b': 'bold', 'Mod-i': 'italic', 'Mod-u': 'underline', 'Alt-Shift-5': 'strike', 'Mod-k': 'link', 'Mod-Shift-i': 'image', 'Mod-Shift-k': 'code', 'Mod-Shift-m': 'math', 'Mod-Shift-q': 'quote', 'Mod-t': 'table', 'Mod-Shift-[': 'ordered', 'Mod-Shift-]': 'bullet', 'Mod-Shift-`': 'inline-code' };
-    for (let n = 0; n <= 6; n++) actions[`Mod-${n}`] = `heading-${n}`;
-    const bindings = Object.entries(actions).map(([key, action]) => ({ key, run: (view: EditorView) => editorAction(view, action), preventDefault: true }));
-    bindings.push({ key: 'Mod-Shift-z', run: redo, preventDefault: true });
-    bindings.push({ key: 'Mod-l', run: selectLine, preventDefault: true });
-    bindings.push({ key: 'Mod-=', run: view => editorAction(view, 'heading-increase'), preventDefault: true });
-    bindings.push({ key: 'Mod--', run: view => editorAction(view, 'heading-decrease'), preventDefault: true });
+    const bindings: import('@codemirror/view').KeyBinding[] = [];
     bindings.push({ key: 'Backspace', preventDefault: false, run(view) {
       const { from, to } = view.state.selection.main;
       if (from === to && from > 0 && ['()', '[]', '{}', '""', "''", '``'].includes(view.state.sliceDoc(from - 1, from + 1))) { view.dispatch({ changes: { from: from - 1, to: from + 1 }, selection: { anchor: from - 1 } }); return true; }
@@ -456,7 +451,7 @@ export class MarkdownEditor {
       }),
       EditorView.inputHandler.of((view, from, to, text) => {
         if (view.composing || text.length !== 1) return false;
-        if (text === '=' && from !== to) return highlightSelection(view);
+        if (text === '=' && from !== to) return host.highlightWithEquals?.() !== false ? highlightSelection(view) : false;
         const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`', '*': '*', '~': '~', '=': '=', '^': '^' };
         const next = view.state.sliceDoc(to, to + 1); if (from === to && /[)\]}"'`]/.test(text) && next === text) { view.dispatch({ selection: { anchor: to + 1 } }); return true; }
         if (!pairs[text]) return false;
@@ -472,7 +467,63 @@ export class MarkdownEditor {
   get source() { return this.view.state.field(sourceField); }
   setCodeWrap(enabled: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeWrap?.(enabled); }
   setCodeAppearance(workbuddy: boolean, githubDark: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeAppearance?.(workbuddy, githubDark); }
-  setSource(source: boolean) { this.view.dispatch({ effects: sourceEffect.of(source) }); this.view.dom.dataset.source = String(source); this.view.focus(); }
+  setSource(source: boolean) {
+    if (source === this.source) return;
+    const sequence = ++this.modeSequence, view = this.view;
+    let selection = view.state.selection.main;
+    const focused = document.activeElement?.closest<HTMLElement>('.md-block');
+    const nested = focused && widgetEditors.get(focused);
+    if (source && focused && nested) {
+      const ctx = (focused as any).context as Context;
+      const body = ctx.from + ctx.source.indexOf('\n') + 1;
+      const map = (position: number) => { const line = nested.state.doc.lineAt(position), raw = view.state.doc.line(Math.min(view.state.doc.lines, view.state.doc.lineAt(body).number + line.number - 1)); const prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0; return Math.min(raw.to, raw.from + prefix + position - line.from); };
+      selection = EditorSelection.range(map(nested.state.selection.main.anchor), map(nested.state.selection.main.head));
+    } else if (source && focused) {
+      const ctx = (focused as any).context as Context, cell = document.activeElement?.closest<HTMLElement>('th,td'), field = focused.querySelector<HTMLTextAreaElement>('textarea');
+      if (cell) {
+        const node = ctx.node.children?.[Number(cell.dataset.row)]?.children?.[Number(cell.dataset.col)], native = window.getSelection();
+        if (node && native?.anchorNode && native.focusNode && cell.contains(native.anchorNode) && cell.contains(native.focusNode)) {
+          const start = startOf(node), raw = view.state.sliceDoc(start, endOf(node)), base = start + /^\|?[ \t]*/.exec(raw)![0].length;
+          const offset = (node: Node, at: number) => { const range = document.createRange(); range.selectNodeContents(cell); range.setEnd(node, at); return range.toString().length; };
+          selection = EditorSelection.range(base + offset(native.anchorNode, native.anchorOffset), base + offset(native.focusNode, native.focusOffset));
+        }
+      } else if (field && document.activeElement === field) { const base = ctx.from + ctx.source.indexOf('\n') + 1; selection = EditorSelection.range(base + field.selectionStart, base + field.selectionEnd); }
+    }
+    const anchor = selection.anchor, head = selection.head;
+    view.dispatch({ effects: [sourceEffect.of(source), EditorView.scrollIntoView(head, { y: 'center' })], selection: { anchor, head } });
+    view.dom.dataset.source = String(source); view.focus();
+    const locate = () => {
+      if (!view.dom.isConnected || sequence !== this.modeSequence || view.state.selection.main.head !== head || view.state.selection.main.anchor !== anchor) return;
+      let target: EditorView | undefined; let fieldRect: DOMRect | undefined;
+      if (!source) {
+        const root = [...view.dom.querySelectorAll<HTMLElement>('.md-block')].find(root => Number(root.dataset.from) <= head && Number(root.dataset.to) >= head);
+        const code = root && widgetEditors.get(root);
+        if (root && code && anchor >= Number(root.dataset.from) && anchor <= Number(root.dataset.to)) {
+          const ctx = (root as any).context as Context, body = ctx.from + ctx.source.indexOf('\n') + 1;
+          const map = (position: number) => { const raw = view.state.doc.lineAt(Math.max(body, position)), n = Math.max(1, Math.min(code.state.doc.lines, raw.number - view.state.doc.lineAt(body).number + 1)), line = code.state.doc.line(n), prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0; return line.from + Math.max(0, Math.min(line.length, position - raw.from - prefix)); };
+          code.dispatch({ selection: { anchor: map(anchor), head: map(head) }, effects: EditorView.scrollIntoView(map(head), { y: 'center' }) }); code.focus(); target = code;
+        } else if (root?.classList.contains('md-table')) {
+          const ctx = (root as any).context as Context;
+          for (const [r, row] of (ctx.node.children ?? []).entries()) for (const [c, cell] of (row.children ?? []).entries()) if (head >= startOf(cell) && head <= endOf(cell) && anchor >= startOf(cell) && anchor <= endOf(cell)) {
+            const field = root.querySelector<HTMLElement>(`[data-row="${r}"][data-col="${c}"]`); if (!field) continue; field.focus();
+            const raw = view.state.sliceDoc(startOf(cell), endOf(cell)), base = startOf(cell) + /^\|?[ \t]*/.exec(raw)![0].length, node = field.firstChild;
+            if (node) { const range = document.createRange(), length = node.textContent?.length ?? 0; range.setStart(node, Math.max(0, Math.min(length, Math.min(anchor, head) - base))); range.setEnd(node, Math.max(0, Math.min(length, Math.max(anchor, head) - base))); const native = window.getSelection(); native?.removeAllRanges(); native?.addRange(range); }
+            fieldRect = field.getBoundingClientRect();
+          }
+        } else if (root?.classList.contains('md-math')) {
+          const field = root.querySelector<HTMLTextAreaElement>('textarea'); if (field) { const ctx = (root as any).context as Context, base = ctx.from + ctx.source.indexOf('\n') + 1; field.focus(); field.setSelectionRange(Math.max(0, anchor - base), Math.max(0, head - base)); fieldRect = field.getBoundingClientRect(); }
+        }
+      }
+      const editor = target ?? view;
+      editor.requestMeasure({ read: current => fieldRect ?? current.coordsAtPos(current.state.selection.main.head), write: coords => {
+        if (!coords || sequence !== this.modeSequence || !view.dom.isConnected) return;
+        const rect = view.scrollDOM.getBoundingClientRect();
+        view.scrollDOM.scrollTop += coords.top - rect.top - rect.height * .4;
+      } });
+    };
+    requestAnimationFrame(() => requestAnimationFrame(locate));
+  }
+
   replace(content: string) { if (this.view.compositionStarted && this.view.state.field(quoteCompositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }
   insertImage(url: string, alt = '图片') { const label = alt.replace(/[\[\]\\\r\n]/g, ' '); const markdown = `![${label}](${url})`; insertBlock(this.view, markdown, markdown.length + 2); }
   action(action: string) { return editorAction(this.view, action); }

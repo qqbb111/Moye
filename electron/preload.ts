@@ -32,6 +32,7 @@ const bridge: RypotaBridge = {
   savePdf: (id, fonts) => ipcRenderer.invoke('pdf:save', id, fonts),
   releasePdf: () => ipcRenderer.invoke('pdf:release'),
   fullscreen: () => ipcRenderer.send('window:fullscreen'),
+  paste: () => ipcRenderer.invoke('edit:paste'),
   clipboard: (action, text) => ipcRenderer.invoke('clipboard:text', action, text),
   finishClose: token => ipcRenderer.send('window:ready-close', token),
   onState: listener => subscribe('workspace:state', listener),

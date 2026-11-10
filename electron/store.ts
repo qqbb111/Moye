@@ -1,3 +1,4 @@
+import { validateShortcuts, restoredShortcuts } from '../shared/commands';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -79,7 +80,7 @@ export class DocumentStore {
     this.recovered = true;
     const restored = { ...snapshot.preferences } as WorkspaceView['preferences'] & { focus?: unknown; typewriter?: unknown };
     delete restored.focus; delete restored.typewriter;
-    this.preferences = { ...this.preferences, ...restored };
+    this.preferences = { ...this.preferences, ...restored, shortcuts: restoredShortcuts(restored.shortcuts) };
     const migrateAppearance = (snapshot.preferences?.appearanceRevision ?? 0) < 1;
     if (migrateAppearance) Object.assign(this.preferences, { theme: 'workbuddy', codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, appearanceRevision: 1 });
     let migratedImages = false;
@@ -231,6 +232,8 @@ export class DocumentStore {
     this.windows.delete(windowId); this.changed();
   }
   setPreferences(preferences: Partial<WorkspaceView['preferences']>) {
+    const shortcuts = preferences.shortcuts === undefined ? undefined : validateShortcuts(preferences.shortcuts);
+    if (shortcuts) this.preferences.shortcuts = shortcuts;
     if (preferences.print) this.preferences.print = printPreferences(preferences.print);
     if (typeof preferences.autoSave === 'boolean') this.preferences.autoSave = preferences.autoSave;
     if (typeof preferences.formatOnSave === 'boolean') this.preferences.formatOnSave = preferences.formatOnSave;

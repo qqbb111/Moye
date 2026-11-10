@@ -19,7 +19,89 @@ const current = (page: Page) => page.locator('.editor-slot:not([hidden])');
 async function setContent(page: Page, content: string) { await page.evaluate(content => (window as any).__editor.setContent(content), content); }
 async function content(page: Page) { return page.evaluate(() => (window as any).__editor.content()); }
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
+async function settingsAction(page: Page, section: string, action: string) { await execute(page, 'preferences'); await page.getByRole('tab', { name: section, exact: true }).click(); await page.locator(`[data-settings-command="${action}"]`).click(); }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
+
+test('更新退出参数走正常保存流程，多窗口草稿在再次启动后仍可恢复', async () => {
+  const first = await launch(); let restored: Awaited<ReturnType<typeof launch>> | undefined;
+  try {
+    await setContent(first.page, '更新之前第一份草稿');
+    const secondPromise = first.application.waitForEvent('window'); await execute(first.page, 'new-window'); const second = await secondPromise;
+    await second.locator('.markdown-editor').waitFor(); await setContent(second, '第二个窗口尚未保存的内容');
+    const nativeProcess = first.application.process();
+    const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_TEST: '1', TYPORA_REPLICA_USER_DATA: first.profile }; delete env.ELECTRON_RUN_AS_NODE;
+    await promisify(execFile)(process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string, [...(process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.']), '--quit-for-update'], { cwd: root, env });
+    await expect.poll(() => nativeProcess.exitCode, { timeout: 20000 }).toBe(0);
+    restored = await launch(first.profile);
+    await expect.poll(async () => Promise.all(restored!.application.windows().map(page => content(page)))).toEqual(expect.arrayContaining(['更新之前第一份草稿', '第二个窗口尚未保存的内容']));
+  } finally { await first.application.close().catch(() => {}); await restored?.application.close(); }
+});
+
+test('设置集中分类，操作保留正文与表格选区，快捷键录制冲突提示和重启持久化', async () => {
+  let app = await launch();
+  try {
+    const page = app.page;
+    await setContent(page, '需要加粗的文字');
+    await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 4 } }); e.focus(); });
+    await page.locator('#settings-open').click(); await expect(page.getByRole('tablist', { name: '设置分类' }).getByRole('tab')).toHaveCount(8);
+    await page.getByRole('tab', { name: '格式', exact: true }).click(); await page.locator('[data-settings-command="bold"]').click();
+    expect(await content(page)).toBe('**需要加粗**的文字');
+    await execute(page, 'preferences'); await page.getByRole('tab', { name: '快捷键', exact: true }).click();
+    await page.getByRole('button', { name: '修改加粗快捷键', exact: true }).click(); await page.keyboard.press('Control+i'); await expect(page.locator('#shortcut-message')).toContainText('冲突');
+    await page.keyboard.press('Control+Alt+b'); await expect(page.locator('[data-shortcut-id="bold"]')).toHaveText('Ctrl+Alt+B');
+    await page.locator('#preferences-apply').click();
+    await setContent(page, '选择'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 2 } }); e.focus(); });
+    await page.keyboard.press('Control+b'); expect(await content(page)).toBe('选择');
+    await page.keyboard.press('Control+Alt+b'); expect(await content(page)).toBe('**选择**');
+    const profile = app.profile; await app.application.close(); app = await launch(profile);
+    await execute(app.page, 'preferences'); await app.page.getByRole('tab', { name: '快捷键', exact: true }).click();
+    await app.page.locator('#shortcut-search').fill('加粗'); await expect(app.page.locator('[data-shortcut-id="bold"]')).toHaveText('Ctrl+Alt+B');
+    await app.page.getByRole('button', { name: '恢复加粗默认快捷键', exact: true }).click(); await app.page.locator('#preferences-apply').click();
+    await setContent(app.page, '| 列一 | 列二 |\n| --- | --- |\n| 内容 | 数据 |');
+    const cell = current(app.page).locator('td').first(); await cell.click();
+    await cell.evaluate(cell => { const range = document.createRange(); range.selectNodeContents(cell); const s = window.getSelection()!; s.removeAllRanges(); s.addRange(range); });
+    await app.page.locator('#settings-open').click(); await app.page.getByRole('tab', { name: '格式', exact: true }).click(); await app.page.locator('[data-settings-command="bold"]').click();
+    expect(await content(app.page)).toContain('| **内容** | 数据 |');
+  } finally { await app.application.close(); }
+});
+
+test('重绑撤销和粘贴作用于代码编辑器，旧快捷键停用且高亮可清除', async () => {
+  const { application, page } = await launch();
+  try {
+    await page.evaluate(() => window.rypota.updatePreferences({ shortcuts: { undo: 'Alt+U', redo: 'Alt+R', paste: 'Alt+V', highlight: '' } }));
+    await setContent(page, '```cpp\nint value = 1;\n```\n\n正文');
+    const code = current(page).locator('.code-content .cm-content'); await code.click(); await page.keyboard.press('Control+End'); await page.keyboard.insertText(' // 新内容');
+    await page.keyboard.press('Control+z'); expect(await content(page)).toContain('// 新内容');
+    await page.keyboard.press('Alt+u'); expect(await content(page)).not.toContain('// 新内容');
+    await page.keyboard.press('Alt+r'); expect(await content(page)).toContain('// 新内容');
+    await application.evaluate(({ clipboard }) => clipboard.writeText('粘贴')); await page.keyboard.press('Alt+v'); await expect.poll(() => content(page)).toContain('新内容粘贴');
+    await setContent(page, '选中文字'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 2 } }); e.focus(); });
+    await page.keyboard.insertText('='); expect(await content(page)).toBe('=文字');
+    await page.evaluate(() => window.rypota.updatePreferences({ shortcuts: {} }));
+  } finally { await application.close(); }
+});
+
+test('源码与排版切换定位正文、长代码及表格的当前光标，不改正文与撤销历史', async () => {
+  const { application, page } = await launch();
+  const prefix = Array.from({ length: 60 }, (_, n) => `第 ${n} 段：正文用于检查滚动位置。\n\n`).join('');
+  const code = Array.from({ length: 90 }, (_, n) => `int value_${n} = ${n};`).join('\n');
+  const raw = `${prefix}## 目标标题\n\n目标段落里的当前位置。\n\n\`\`\`cpp\n${code}\n\`\`\`\n\n| 表头 | 类型 |\n| --- | --- |\n| 目标单元格 | 数据 |\n\n结尾`;
+  try {
+    await setContent(page, raw);
+    for (const needle of ['当前位置', 'value_65', '目标单元格']) {
+      await page.evaluate(position => { const e = (window as any).__editor.active(); e.setSource(true); e.view.dispatch({ selection: { anchor: position } }); e.focus(); }, raw.indexOf(needle) + 2);
+      await page.keyboard.press('Control+/');
+      await expect.poll(() => page.evaluate(() => (window as any).__editor.active().view.scrollDOM.scrollTop)).toBeGreaterThan(500);
+      if (needle === 'value_65') await expect(current(page).locator('.code-content .cm-content')).toBeFocused();
+      if (needle === '目标单元格') await expect(current(page).locator('td').first()).toBeFocused();
+      await page.keyboard.insertText('X'); await expect.poll(() => content(page)).toBe(raw.slice(0, raw.indexOf(needle) + 2) + 'X' + raw.slice(raw.indexOf(needle) + 2));
+      await page.keyboard.press('Control+z'); expect(await content(page)).toBe(raw);
+      await page.keyboard.press('Control+/');
+      await expect.poll(() => page.evaluate(() => (window as any).__editor.active().source)).toBe(true);
+      expect(await content(page)).toBe(raw);
+    }
+  } finally { await application.close(); }
+});
 
 test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住版式字号，编辑主题和原文不变', async () => {
   const { application, page, directory } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -117,9 +199,9 @@ test('精简界面保留文件入口，移除模式且窄窗口可用', async ()
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 640, height: 650 }); window.show(); window.focus(); });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.locator('.document-heading,.quick-actions,#sidebar-close,#open-folder,#reading-time,#reading-width')).toHaveCount(0);
-    await expect(page.locator('.menubar > button')).toHaveCount(6);
+    await expect(page.locator('[data-menu-index]')).toHaveCount(0); await expect(page.locator('#settings-open')).toHaveCount(1);
     await expect(page.locator('#tabbar')).toBeVisible();
-    await page.getByRole('button', { name: '文件', exact: true }).click(); await page.getByRole('menuitem', { name: /^快速打开/ }).click();
+    await settingsAction(page, '文件', 'quick-open');
     await expect(page.locator('#quick-open')).toBeVisible(); await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await expect(page.locator('.tab')).toHaveCount(2);
     await setContent(page, '# 精简界面\n\n正文');
@@ -143,7 +225,7 @@ test('侧栏与标签切换平滑，快速反向操作和减少动态效果仍�
     const during = await page.locator('#sidebar').evaluate(sidebar => {
       const animation = sidebar.getAnimations()[0]; if (!animation) return null;
       animation.pause(); animation.currentTime = 110;
-      const width = sidebar.getBoundingClientRect().width; animation.play(); return width;
+      const box = sidebar.getBoundingClientRect(); const width = box.right - Math.max(0, box.left); animation.play(); return width;
     });
     expect(during).toBeGreaterThan(0); expect(during).toBeLessThan(256);
     await expect(page.locator('#sidebar-resize')).toBeVisible();
@@ -383,8 +465,8 @@ test('引用菜单和快捷键创建后光标留在标记之后，可直接输�
   try {
     for (const mode of ['shortcut', 'menu', 'blurred']) {
       await setContent(page, ''); await current(page).locator('.cm-content').click();
-      if (mode === 'menu') { await page.getByRole('button', { name: '段落', exact: true }).click(); await page.getByRole('menuitem', { name: /^引用/ }).click(); }
-      else { if (mode === 'blurred') await page.getByRole('button', { name: '段落', exact: true }).focus(); await page.keyboard.press('Control+Shift+Q'); }
+      if (mode === 'menu') { await settingsAction(page, '段落', 'quote'); }
+      else { if (mode === 'blurred') await page.locator('#settings-open').focus(); await page.keyboard.press('Control+Shift+Q'); }
       expect(await content(page)).toBe('> '); expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(2);
       await page.keyboard.insertText('引用正文'); expect(await content(page)).toBe('> 引用正文'); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('> '); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('');
     }
@@ -413,7 +495,6 @@ test('引用内原生输入法多轮组合不重复提交，输入期间不被�
 
 test('无选区 Ctrl+C/X 和菜单处理整行，选区保持精确并支持撤销和代码行', async () => {
   const { application, page } = await launch();
-  await application.evaluate(({ clipboard }) => { let text = ''; clipboard.readText = async () => text; clipboard.writeText = async value => { text = value; }; });
   const copied = () => application.evaluate(({ clipboard }) => clipboard.readText());
   const caret = (position: number) => page.evaluate(position => { const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor: position } }); editor.focus(); }, position);
   try {
@@ -524,13 +605,12 @@ test('文件树、相对图片、HTML 和 PDF 导出', async () => {
 
 test('输入转换、列表延续、格式快捷键、查找和菜单剪贴板', async () => {
   const { application, page } = await launch();
-  await application.evaluate(({ clipboard }) => { let text = ''; clipboard.readText = async () => text; clipboard.writeText = async value => { text = value; }; });
   try {
     const body = current(page).locator('.markdown-editor > .cm-scroller > .cm-content');
     await body.click(); await page.keyboard.type('```'); await page.keyboard.press('Enter'); await expect(current(page).locator('.code-content')).toHaveCount(1); await page.keyboard.insertText('连续输入的代码'); await expect.poll(() => content(page)).toContain('连续输入的代码');
     await setContent(page, '- 第一项'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: e.content.length } }); e.focus(); }); await page.keyboard.press('Enter'); await page.keyboard.insertText('第二项'); expect(await content(page)).toContain('- 第一项\n- 第二项');
     await setContent(page, '需要加粗的正文'); await body.click(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+b'); expect(await content(page)).toBe('**需要加粗的正文**');
-    await execute(page, 'copy'); await execute(page, 'new'); await execute(page, 'paste'); expect(await content(page)).toBe('需要加粗的正文');
+    await execute(page, 'copy'); await execute(page, 'new'); await execute(page, 'paste'); await expect.poll(() => content(page)).toBe('需要加粗的正文');
     await page.keyboard.press('Control+f'); await expect(page.getByPlaceholder('查找')).toBeVisible(); await page.getByPlaceholder('查找').fill('加粗'); await page.getByPlaceholder('查找').press('Enter'); await expect(current(page).locator('.cm-searchMatch')).toHaveCount(1); await page.keyboard.press('Escape');
     await page.keyboard.press('Control+Shift+n'); await expect.poll(() => application.windows().length).toBe(2);
   } finally { await application.close(); }
@@ -759,7 +839,7 @@ test('插入表格后输入留在单元格，Tab 续行与菜单插入均可直�
     for (const text of ['列一', '列二', '数据一', '数据二', '新行一']) { await page.keyboard.insertText(text); if (text !== '新行一') await page.keyboard.press('Tab'); }
     await page.keyboard.press('Enter'); await expect(table.locator('tr')).toHaveCount(3);
     const raw = await content(page); expect(raw).toContain('| 列一 | 列二 |'); expect(raw).toContain('| 数据一 | 数据二 |'); expect(raw).toContain('| 新行一 |  |'); expect(raw).toMatch(/^前文正文\n\n\|/);
-    await page.getByRole('button', { name: '段落', exact: true }).click(); await page.getByRole('menuitem', { name: /^表格/ }).click(); await expect(current(page).locator('table')).toHaveCount(2);
+    await settingsAction(page, '段落', 'table'); await expect(current(page).locator('table')).toHaveCount(2);
     await page.keyboard.insertText('新表头'); await expect.poll(() => content(page)).toContain('| 新表头 | 标题 |'); expect(errors).toEqual([]);
   } finally { await application.close(); }
 });

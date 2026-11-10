@@ -118,3 +118,16 @@ test('关闭自动保存后只保存草稿，较早的编辑消息不会回滚�
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '手动.md'); await fs.writeFile(file, '原文');
   try { const { id } = await store.openFile(windowId, file); store.setPreferences({ autoSave: false }); store.update(windowId, id, '最新', 2); store.update(windowId, id, '过期', 1); await store.flush(); assert.equal(await fs.readFile(file, 'utf8'), '原文'); assert.equal(store.documents.get(id)!.content, '最新'); } finally { store.dispose(); }
 });
+
+
+test('快捷键冲突不会部分写入设置，重启保留自定义和清除的快捷键', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '快捷键不改原文');
+    assert.throws(() => store.setPreferences({ shortcuts: { bold: 'Ctrl+I' }, fontSize: 23 }));
+    assert.equal(store.preferences.fontSize, 16);
+    store.setPreferences({ shortcuts: { bold: 'Ctrl+Alt+B', highlight: '', 'toggle-source': 'Alt+S' } }); await store.flush();
+    const restored = new DocumentStore(store.directory); await restored.initialize();
+    try { assert.deepEqual(restored.preferences.shortcuts, store.preferences.shortcuts); assert.equal(restored.documents.get(id)?.content, '快捷键不改原文'); } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});

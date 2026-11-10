@@ -162,7 +162,12 @@ dialog input[type=number], dialog select { border-radius: 6px; }
 /* Navigation moves briefly; typing and pointer resizing stay immediate. */
 #editor-stage { overflow: hidden; }
 #sidebar.sidebar-moving { overflow: hidden; }
-#sidebar.sidebar-moving > * { min-width: calc(var(--sidebar-width) - 28px); }
+.workspace { position: relative; overflow: hidden; }
+#sidebar, .workspace > main { will-change: transform; }
+#sidebar.sidebar-leaving { position: absolute; top: 0; bottom: 0; left: 0; z-index: 4; }
+#sidebar.sidebar-moving { pointer-events: none; }
+#settings-open { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; }
+#settings-open .replica-icon { width: 15px; height: 15px; }
 .tab, .sidebar-tabs button { transition: background-color 140ms ease, color 140ms ease; }
 
 /* Moye: a quiet application frame around the user's chosen prose theme. */

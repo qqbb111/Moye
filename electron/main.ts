@@ -179,6 +179,7 @@ function registerIpc() {
     else codeTheme.stop();
     publish(); await store.persist();
   });
+  handle('edit:paste', windowId => windows.get(windowId)!.webContents.paste());
   handle('code-theme:refresh', async () => { await codeTheme.refresh(true); publish(); });
   const folderEntries = async (directory: string) => {
     const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -268,6 +269,7 @@ let launchReady = false;
 const queuedLaunches: Array<{ argv: string[]; cwd: string }> = [];
 function handleLaunch(argv: string[], cwd: string) {
   if (!launchReady) { queuedLaunches.push({ argv, cwd }); return; }
+  if (argv.includes('--quit-for-update')) { app.quit(); return; }
   const files = argv.filter(arg => /\.(md|markdown|mdown|mkd)$/i.test(arg));
   const target = [...windows.keys()][0];
   if (!files.length || argv.includes('--new-window') || !target) newBlankWindow();
