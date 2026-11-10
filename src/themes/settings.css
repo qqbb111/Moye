@@ -20,8 +20,8 @@
 #preferences .shortcut-clear, #preferences .shortcut-reset { width: 26px; height: 26px; padding: 5px; border: 0; background: transparent; color: var(--muted); }
 #preferences .settings-command button:hover { background: var(--hover); }
 #preferences .settings-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: auto; min-height: 68px; padding: 14px 26px; border-top: 1px solid var(--border); background: var(--bg); }
+#preferences .settings-footer > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 76px; height: 32px; padding: 0 16px; font: 500 13px/1 var(--ui-font); border-radius: 6px; }
 #shortcut-message { flex: 1; font-size: 12px; line-height: 1.5; color: var(--ui-accent); }
-#preferences-apply { min-width: 70px; }
 #settings-about { padding: 20px 8px; }
 #settings-about h3 { font-size: 22px; font-weight: 600; }
 @media (max-width: 700px) {

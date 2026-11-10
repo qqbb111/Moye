@@ -28,7 +28,7 @@ if (existsSync(path.join(releaseRoot, 'Typora Replica.exe'))) {
     }
     if (existsSync('public')) await fs.cp('public', path.join(staging, 'dist'), { recursive: true });
   } else await fs.cp('dist', path.join(staging, 'dist'), { recursive: true });
-  for (const item of ['dist-electron', 'assets', 'docs', 'package.json', 'README.md', 'THIRD_PARTY_NOTICES.txt']) await fs.cp(path.resolve(item), path.join(staging, item), { recursive: true });
+  for (const item of ['dist-electron', 'assets', 'docs', 'package.json', 'README.md', 'AGENTS.md', 'THIRD_PARTY_NOTICES.txt']) await fs.cp(path.resolve(item), path.join(staging, item), { recursive: true });
   const target = path.join(releaseRoot, 'resources/app.asar');
   const temporary = path.join(releaseRoot, 'resources', `app-${randomUUID()}.asar`);
   const { createPackage } = await import('@electron/asar');
