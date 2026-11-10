@@ -17,6 +17,21 @@ test('打印偏好在重启后保留两套字号，文档和编辑主题保持�
   } finally { store.dispose(); }
 });
 
+test('恢复旧版模式设置时移除专注和打字机标记，草稿及其他偏好保留', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '旧草稿不能改变'); await store.flush();
+    const snapshot = JSON.parse(await fs.readFile(store.sessionPath, 'utf8'));
+    Object.assign(snapshot.preferences, { focus: true, typewriter: true, readingWidth: 1080 });
+    await fs.writeFile(store.sessionPath, JSON.stringify(snapshot));
+    const restored = new DocumentStore(store.directory); await restored.initialize();
+    try {
+      assert.equal('focus' in restored.preferences, false); assert.equal('typewriter' in restored.preferences, false);
+      assert.equal(restored.preferences.readingWidth, 1080); assert.equal(restored.documents.get(id)?.content, '旧草稿不能改变');
+    } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
+
 test('阅读宽度、侧栏宽度和代码折行校验范围，恢复时保留草稿和显示偏好', async () => {
   const { store, windowId } = await setup();
   try {

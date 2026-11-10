@@ -109,18 +109,80 @@ test('长文先显示实际首页，整份完成前不可保存，接收旧请�
   } finally { await application.close(); }
 });
 
-test('墨页名称、紧凑标题栏和文件切换入口在窄窗口也可用', async () => {
+test('精简界面保留文件入口，移除模式且窄窗口可用', async () => {
   const { application, page } = await launch();
   try {
     expect(await application.evaluate(({ app }) => app.getName())).toBe('墨页 Moye');
-    await expect(page).toHaveTitle(/墨页 Moye$/); await expect(page.locator('.brand-name')).toContainText('墨页');
-    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 640, height: 650 }); window.showInactive(); });
+    await expect(page).toHaveTitle(/墨页 Moye$/);
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 640, height: 650 }); window.show(); window.focus(); });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const menu = page.getByRole('navigation', { name: '应用菜单' }); await menu.getByRole('button', { name: '文件', exact: true }).click(); await expect(page.locator('#menu')).toBeVisible(); await page.keyboard.press('Escape');
-    await page.locator('#document-switch').click(); await expect(page.locator('#quick-open')).toBeVisible(); await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: '新建文档', exact: true }).click(); await expect(page.locator('.tab')).toHaveCount(2);
-    await setContent(page, '# 新界面保留原文\n\n正文'); await execute(page, 'focus'); await expect(page.locator('.document-heading')).toBeHidden();
-    await execute(page, 'focus'); await expect(page.locator('.document-heading')).toBeVisible(); expect(await content(page)).toBe('# 新界面保留原文\n\n正文');
+    await expect(page.locator('.document-heading,.quick-actions,#sidebar-close,#open-folder,#reading-time,#reading-width')).toHaveCount(0);
+    await expect(page.locator('.menubar > button')).toHaveCount(6);
+    await expect(page.locator('#tabbar')).toBeVisible();
+    await page.getByRole('button', { name: '文件', exact: true }).click(); await page.getByRole('menuitem', { name: /^快速打开/ }).click();
+    await expect(page.locator('#quick-open')).toBeVisible(); await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await expect(page.locator('.tab')).toHaveCount(2);
+    await setContent(page, '# 精简界面\n\n正文');
+    await page.keyboard.press('F8'); await page.keyboard.press('F9');
+    await execute(page, 'preferences'); await expect(page.locator('#preferences')).toBeVisible();
+    await expect(page.locator('#focus-toggle,#typewriter-toggle')).toHaveCount(0);
+    await expect(page.locator('#preferences')).not.toContainText('专注模式'); await expect(page.locator('#preferences')).not.toContainText('打字机模式');
+    await page.locator('#reading-width-select').selectOption('1080'); await page.locator('#preferences-apply').click();
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('1080px');
+    expect(await content(page)).toBe('# 精简界面\n\n正文');
+  } finally { await application.close(); }
+});
+
+test('侧栏与标签切换平滑，快速反向操作和减少动态效果仍能立即编辑', async () => {
+  const { application, page } = await launch();
+  try {
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.show(); window.focus(); });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await setContent(page, '# 原文\n\n正在写作的内容');
+    await execute(page, 'sidebar');
+    const during = await page.locator('#sidebar').evaluate(sidebar => {
+      const animation = sidebar.getAnimations()[0]; if (!animation) return null;
+      animation.pause(); animation.currentTime = 110;
+      const width = sidebar.getBoundingClientRect().width; animation.play(); return width;
+    });
+    expect(during).toBeGreaterThan(0); expect(during).toBeLessThan(256);
+    await expect(page.locator('#sidebar-resize')).toBeVisible();
+    for (let i = 0; i < 4; i++) await execute(page, 'sidebar');
+    await expect(page.locator('#sidebar')).toBeVisible(); await expect(page.locator('#sidebar-resize')).toBeVisible();
+    await expect.poll(() => page.locator('#sidebar').evaluate(e => Math.round(e.getBoundingClientRect().width))).toBe(256);
+    await execute(page, 'new'); await setContent(page, '第二页'); await execute(page, 'previous-tab');
+    const animated = await current(page).evaluate(slot => slot.getAnimations().length); expect(animated).toBeGreaterThan(0);
+    await page.evaluate(() => { const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor: editor.content.length } }); editor.focus(); });
+    await page.keyboard.insertText('继续'); expect(await content(page)).toBe('# 原文\n\n正在写作的内容继续');
+    await page.keyboard.press('Control+z'); expect(await content(page)).toBe('# 原文\n\n正在写作的内容');
+    await execute(page, 'next-tab'); expect(await content(page)).toBe('第二页');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await execute(page, 'sidebar'); await expect(page.locator('#sidebar')).toBeHidden();
+    await execute(page, 'sidebar'); await expect(page.locator('#sidebar-resize')).toBeVisible();
+    expect(await page.locator('#sidebar').evaluate(e => e.getAnimations().length)).toBe(0);
+    await execute(page, 'previous-tab'); expect(await current(page).evaluate(e => e.getAnimations().length)).toBe(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } finally { await application.close(); }
+});
+
+test('段落回车后的退格和 Delete 整体合并，保留 Shift+Enter 和源码换行语义', async () => {
+  const { application, page } = await launch();
+  const caret = (position: number) => page.evaluate(position => { const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor: position } }); editor.focus(); }, position);
+  try {
+    for (const theme of ['workbuddy', 'dark']) {
+      await execute(page, theme); await setContent(page, '前文'); await caret(2);
+      await page.keyboard.press('Enter'); expect(await content(page)).toBe('前文\n\n');
+      await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文');
+      await page.keyboard.press('Control+z'); expect(await content(page)).toBe('前文\n\n');
+      await page.keyboard.press('Control+Shift+z'); expect(await content(page)).toBe('前文');
+      await page.keyboard.press('Enter'); await page.keyboard.insertText('后文'); await caret(4);
+      await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文后文');
+      await setContent(page, '前文\n\n后文'); await caret(2); await page.keyboard.press('Delete'); expect(await content(page)).toBe('前文后文');
+      await setContent(page, '前文'); await caret(2); await page.keyboard.press('Shift+Enter'); await page.keyboard.insertText('同行段落'); expect(await content(page)).toBe('前文  \n同行段落');
+    }
+    await setContent(page, '前文\n\n\n后文'); await caret(5); await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n\n后文');
+    await execute(page, 'toggle-source'); await setContent(page, '前文\n\n后文'); await caret(4); await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n后文');
+    await setContent(page, '前文'); await caret(2); await page.keyboard.press('Enter'); expect(await content(page)).toBe('前文\n');
   } finally { await application.close(); }
 });
 
@@ -224,10 +286,10 @@ test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保�
     await separator.hover(); await expect(separator).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)'); expect(await separator.evaluate(element => getComputedStyle(element, '::after').width)).toBe('1px');
     await app.page.mouse.move(box.x + box.width / 2, box.y + 90); await app.page.mouse.down(); await app.page.mouse.move(box.x + box.width / 2 + 54, box.y + 90, { steps: 8 }); await app.page.mouse.up();
     await expect(separator).toHaveAttribute('aria-valuenow', '310'); await separator.focus(); await app.page.keyboard.press('ArrowRight'); await expect(separator).toHaveAttribute('aria-valuenow', '320');
-    await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click(); await app.page.getByRole('button', { name: '阅读宽度', exact: true }).click();
-    await expect(app.page.locator('#reading-width')).toContainText('紧凑'); await execute(app.page, 'preferences'); await expect(app.page.locator('#reading-width-select')).toHaveValue('720'); await app.page.locator('#preferences button[value="cancel"]').click();
+    await execute(app.page, 'preferences'); await app.page.locator('#reading-width-select').selectOption('720'); await app.page.locator('#preferences-apply').click();
+    await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); await execute(app.page, 'preferences'); await expect(app.page.locator('#reading-width-select')).toHaveValue('720'); await app.page.locator('#preferences button[value="cancel"]').click();
     expect(await content(app.page)).toBe(raw); const profile = app.profile; await app.application.close(); app = await launch(profile);
-    await expect(app.page.getByRole('separator', { name: '调整侧栏宽度' })).toHaveAttribute('aria-valuenow', '320'); await expect(app.page.locator('#reading-width')).toContainText('紧凑'); expect(await content(app.page)).toBe(raw);
+    await expect(app.page.getByRole('separator', { name: '调整侧栏宽度' })).toHaveAttribute('aria-valuenow', '320'); await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); expect(await content(app.page)).toBe(raw);
   } finally { await app.application.close(); }
 });
 
@@ -240,10 +302,10 @@ test('快速打开去重并支持方向键选择和路径搜索，中文组合�
     }
     await execute(page, 'previous-tab'); await page.keyboard.press('Control+p'); await expect(page.locator('#quick-results button')).toHaveCount(2);
     await expect(page.locator('#quick-results button').first()).toHaveAttribute('aria-selected', 'true'); await page.keyboard.press('ArrowDown'); await expect(page.locator('#quick-results button').last()).toHaveAttribute('aria-selected', 'true'); await page.keyboard.press('Enter');
-    await expect(page.locator('#quick-open')).not.toBeVisible(); await expect(page.locator('#caption')).toContainText('02-系统.md');
+    await expect(page.locator('#quick-open')).not.toBeVisible(); await expect(page.locator('.tab.active .tab-label')).toContainText('02-系统.md');
     await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('01-算法'); await expect(page.locator('#quick-results button')).toHaveCount(1);
     await page.locator('#quick-input').evaluate(input => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))); await expect(page.locator('#quick-open')).toBeVisible();
-    await page.keyboard.press('Enter'); await expect(page.locator('#caption')).toContainText('01-算法.md');
+    await page.keyboard.press('Enter'); await expect(page.locator('.tab.active .tab-label')).toContainText('01-算法.md');
     await page.keyboard.press('Control+p'); await page.locator('#quick-input').fill('不会存在的标题'); await expect(page.locator('.quick-empty')).toContainText('没有找到'); await page.keyboard.press('Escape'); await expect(page.locator('#quick-open')).not.toBeVisible();
   } finally { await application.close(); }
 });
@@ -503,11 +565,11 @@ test('编辑嵌套引用代码保留外层 Markdown 结构', async () => {
   } finally { await application.close(); }
 });
 
-test('Copilot 主题可从菜单和偏好设置选择，重启后仍保留', async () => {
+test('Copilot 主题统一从偏好设置选择，重启后仍保留', async () => {
   let currentApp = await launch();
   try {
     const raw = '## 标题\n\n> **引用块**\n\n```\n应用层 HTTP\n传输层 TCP\n```\n'; await setContent(currentApp.page, raw);
-    await currentApp.page.getByRole('button', { name: '主题', exact: true }).click(); await currentApp.page.getByRole('menuitem', { name: 'Copilot 深色' }).click();
+    await execute(currentApp.page, 'preferences'); await currentApp.page.locator('#theme-select').selectOption('copilot'); await currentApp.page.locator('#preferences-apply').click();
     await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'copilot');
     await expect(current(currentApp.page).locator('.md-quote')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await execute(currentApp.page, 'preferences'); await expect(currentApp.page.locator('#theme-select')).toHaveValue('copilot'); await currentApp.page.getByRole('button', { name: '应用', exact: true }).click();
@@ -581,7 +643,7 @@ test('鼠标左右拖动标签保持当前编辑和撤销，重启恢复排序',
     const held = (await page.locator('.tab.active').elementHandle())!; const transfer = await page.evaluateHandle(() => new DataTransfer());
     await held.dispatchEvent('dragstart', { dataTransfer: transfer });
     await app.application.evaluate(async (_electron, file) => { const state = (globalThis as any).__replicaTest; await state.store.save(state.store.view([...state.windows.keys()][0]).activeId, file); }, path.join(app.directory, '拖动期间保存.md'));
-    await expect(page.locator('#caption')).toContainText('拖动期间保存.md'); expect(await held.evaluate(element => element.isConnected)).toBe(true);
+    await expect(page).toHaveTitle(/拖动期间保存\.md/); expect(await held.evaluate(element => element.isConnected)).toBe(true);
     await held.dispatchEvent('dragend', { dataTransfer: transfer }); await expect(page.locator('.tab.active')).toContainText('拖动期间保存.md');
     await page.evaluate(() => (window as any).__editor.active().focus()); await page.keyboard.press('Control+End'); await page.keyboard.insertText('继续编辑'); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('第三个文档');
     await app.application.close(); app = await launch(app.profile);

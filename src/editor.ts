@@ -374,6 +374,26 @@ export function editorAction(view: EditorView, action: string): boolean {
   if (action === 'clear-format') { const { from, to } = view.state.selection.main; view.dispatch({ changes: { from, to, insert: view.state.sliceDoc(from, to).replace(/\*\*|~~|==|`|\*/g, '') } }); return true; }
   return false;
 }
+function deleteParagraphBoundary(view: EditorView, backward: boolean): boolean {
+  if (view.state.field(sourceField) || view.composing || view.compositionStarted || view.state.selection.ranges.length !== 1) return false;
+  const selection = view.state.selection.main;
+  if (!selection.empty) return false;
+  const row = view.state.doc.lineAt(selection.head);
+  if (selection.head !== (backward ? row.from : row.to)) return false;
+  const from = backward ? selection.head - 2 : selection.head, to = from + 2;
+  const source = view.state.doc.toString();
+  if (from < 0 || to > source.length || source.slice(from, to) !== '\n\n') return false;
+  // A paragraph separator is one editing action. Leave additional blank lines,
+  // explicit line breaks, nested lists and block widgets to their own keymaps.
+  if (source[from - 1] === '\n' || source[to] === '\n') return false;
+  const nodes = parseMarkdown(source).children ?? [];
+  const editable = (node?: MarkdownNode) => node?.type === 'heading' || (node?.type === 'paragraph' &&
+    !/^\[toc\]$/i.test(source.slice(startOf(node), endOf(node)).trim()) &&
+    !(node.children?.length === 1 && node.children[0].type === 'image'));
+  if (!editable(nodes.find(node => endOf(node) === from)) || (to !== source.length && !editable(nodes.find(node => startOf(node) === to)))) return false;
+  view.dispatch({ changes: { from, to }, selection: { anchor: from }, annotations: isolateHistory.of('full'), scrollIntoView: true });
+  return true;
+}
 function smartEnter(view: EditorView): boolean {
   if (view.state.field(sourceField)) return false;
   const selection = view.state.selection.main;
@@ -423,9 +443,10 @@ export class MarkdownEditor {
     bindings.push({ key: 'Backspace', preventDefault: false, run(view) {
       const { from, to } = view.state.selection.main;
       if (from === to && from > 0 && ['()', '[]', '{}', '""', "''", '``'].includes(view.state.sliceDoc(from - 1, from + 1))) { view.dispatch({ changes: { from: from - 1, to: from + 1 }, selection: { anchor: from - 1 } }); return true; }
-      if (!view.state.field(sourceField) && from === to) { const row = view.state.doc.lineAt(from); const prefix = /^#{1,6}\s+/.exec(row.text); if (prefix && from <= row.from + prefix[0].length) { view.dispatch({ changes: { from: row.from, to: row.from + prefix[0].length }, selection: { anchor: row.from } }); return true; } if (deleteMarkupBackward(view)) return true; }
+      if (!view.state.field(sourceField) && from === to) { const row = view.state.doc.lineAt(from); const prefix = /^#{1,6}\s+/.exec(row.text); if (prefix && from <= row.from + prefix[0].length) { view.dispatch({ changes: { from: row.from, to: row.from + prefix[0].length }, selection: { anchor: row.from } }); return true; } if (deleteParagraphBoundary(view, true) || deleteMarkupBackward(view)) return true; }
       return false;
     } });
+    bindings.push({ key: 'Delete', run: view => deleteParagraphBoundary(view, false), preventDefault: false });
     this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, quoteCompositionField, preview, history(), drawSelection(), dropCursor(), rectangularSelection(), highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
       EditorView.updateListener.of(update => { if (update.docChanged) host.changed(update.state.doc.toString()); }),
       EditorView.domEventHandlers({

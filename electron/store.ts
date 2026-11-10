@@ -54,7 +54,7 @@ export class DocumentStore {
   readonly windows = new Map<string, WindowRecord>();
   readonly images: ImageAttachments;
   recent: string[] = [];
-  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'workbuddy', fontSize: 16, sidebar: false, tabs: true, focus: false, typewriter: false, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
+  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'workbuddy', fontSize: 16, sidebar: false, tabs: true, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
   recovered = false;
   onChanged: () => void = () => {};
   onError: (message: string) => void = () => {};
@@ -77,7 +77,9 @@ export class DocumentStore {
     }
     if (!snapshot) return;
     this.recovered = true;
-    this.preferences = { ...this.preferences, ...snapshot.preferences };
+    const restored = { ...snapshot.preferences } as WorkspaceView['preferences'] & { focus?: unknown; typewriter?: unknown };
+    delete restored.focus; delete restored.typewriter;
+    this.preferences = { ...this.preferences, ...restored };
     const migrateAppearance = (snapshot.preferences?.appearanceRevision ?? 0) < 1;
     if (migrateAppearance) Object.assign(this.preferences, { theme: 'workbuddy', codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, appearanceRevision: 1 });
     let migratedImages = false;
@@ -239,7 +241,7 @@ export class DocumentStore {
     if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot' || preferences.theme === 'workbuddy') this.preferences.theme = preferences.theme;
     if (preferences.codeTheme === 'modern-dark' || preferences.codeTheme === 'vscode' || preferences.codeTheme === 'github-dark') this.preferences.codeTheme = preferences.codeTheme;
     if (typeof preferences.fontSize === 'number' && Number.isFinite(preferences.fontSize)) this.preferences.fontSize = Math.max(14, Math.min(24, preferences.fontSize));
-    for (const key of ['sidebar', 'tabs', 'focus', 'typewriter'] as const) if (typeof preferences[key] === 'boolean') this.preferences[key] = preferences[key];
+    for (const key of ['sidebar', 'tabs'] as const) if (typeof preferences[key] === 'boolean') this.preferences[key] = preferences[key];
     if (!this.preferences.autoSave) { for (const timer of this.autoTimers.values()) clearTimeout(timer); this.autoTimers.clear(); }
     else for (const document of this.documents.values()) {
       if (!document.path || !document.dirty || document.error || this.autoTimers.has(document.id) || !this.owner(document.id)) continue;

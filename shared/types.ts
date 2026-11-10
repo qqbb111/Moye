@@ -23,7 +23,7 @@ export interface WorkspaceView {
   activeId: string | null;
   drafts: DocumentView[];
   recent: string[];
-  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; focus?: boolean; typewriter?: boolean; codeTheme?: 'modern-dark' | 'vscode' | 'github-dark'; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; print?: PrintPreferences };
+  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: 'modern-dark' | 'vscode' | 'github-dark'; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; print?: PrintPreferences };
   codeTheme?: CodeThemeSnapshot;
   recovered: boolean;
 }
