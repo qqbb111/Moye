@@ -486,6 +486,30 @@ test('Windows 快捷方式补齐稳定应用标识，保护其他应用和文档
   } finally { await application.close(); }
 });
 
+test('文楷主题离线使用应用内嵌字形', async () => {
+  const { application, page } = await launch();
+  try {
+    await page.route(/^https?:/, route => route.abort());
+    await setContent(page, '霞鹜文楷用于中文正文。');
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    for (const theme of ['light', 'dark', 'copilot'] as const) {
+      await page.evaluate(theme => window.rypota.updatePreferences({ theme }), theme);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      const line = current(page).locator('.cm-line').filter({ hasText: '霞鹜文楷用于中文正文。' });
+      await line.evaluate(async element => {
+        element.id = 'wenkai-probe';
+        await document.fonts.load('16px "Moye WenKai"', element.textContent ?? '');
+      });
+      const { root } = await cdp.send('DOM.getDocument');
+      const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#wenkai-probe' });
+      const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+      expect(fonts.some(font => font.postScriptName === 'LXGWWenKai-Regular' && font.isCustomFont && font.glyphCount >= 10), JSON.stringify(fonts)).toBe(true);
+    }
+  } finally { await application.close(); }
+});
+
 test('WorkBuddy 排版、嵌入字体、行号槽与 Shiki github-dark 代表色实际生效', async () => {
   const { application, page, directory } = await launch();
   try {

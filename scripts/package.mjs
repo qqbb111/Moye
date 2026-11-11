@@ -13,22 +13,26 @@ async function brandExecutable(executable) {
 }
 const electronVersion = JSON.parse(readFileSync('node_modules/electron/package.json', 'utf8')).version;
 const releaseRoot = path.resolve('release/Typora Replica-win32-x64');
+const staging = path.resolve('.test-data', `package-${randomUUID()}`);
+const dist = path.resolve('dist');
+const manifest = JSON.parse(await fs.readFile('dist-electron/renderer-files.json', 'utf8'));
+if (!Array.isArray(manifest.files) || !manifest.files.includes('index.html') || manifest.indexHash !== createHash('sha256').update(await fs.readFile('dist/index.html')).digest('hex')) throw new Error('构建清单已过期，请先运行 npm run build。');
+async function stageFile(source, relative) {
+  const destination = path.join(staging, relative);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(source, destination);
+}
+for (const file of manifest.files) {
+  const source = path.resolve(dist, file);
+  if (!source.startsWith(dist + path.sep)) throw new Error('构建清单路径不正确');
+  await stageFile(source, path.join('dist', file));
+}
+if (existsSync('public')) await fs.cp('public', path.join(staging, 'dist'), { recursive: true });
+for (const file of ['dist-electron/main.cjs', 'dist-electron/preload.cjs', 'package.json', 'THIRD_PARTY_NOTICES.txt']) await stageFile(file, file);
+
 if (existsSync(path.join(releaseRoot, 'Typora Replica.exe'))) {
   const installedVersion = readFileSync(path.join(releaseRoot, 'version'), 'utf8').trim().replace(/^v/, '');
   if (installedVersion !== electronVersion) throw new Error('发布目录的 Electron 版本不同，请保留旧版本并选择新的输出目录后打包。');
-  const staging = path.resolve('.test-data', `package-${randomUUID()}`);
-  await fs.mkdir(staging, { recursive: true });
-  if (existsSync('dist-electron/renderer-files.json')) {
-    const manifest = JSON.parse(await fs.readFile('dist-electron/renderer-files.json', 'utf8'));
-    if (!Array.isArray(manifest.files) || !manifest.files.includes('index.html') || manifest.indexHash !== createHash('sha256').update(await fs.readFile('dist/index.html')).digest('hex')) throw new Error('构建清单已过期，请先运行 npm run build。');
-    const root = path.resolve('dist');
-    for (const file of manifest.files) {
-      const source = path.resolve(root, file); if (!source.startsWith(root + path.sep)) throw new Error('构建清单路径不正确');
-      const destination = path.join(staging, 'dist', file); await fs.mkdir(path.dirname(destination), { recursive: true }); await fs.copyFile(source, destination);
-    }
-    if (existsSync('public')) await fs.cp('public', path.join(staging, 'dist'), { recursive: true });
-  } else await fs.cp('dist', path.join(staging, 'dist'), { recursive: true });
-  for (const item of ['dist-electron', 'assets', 'docs', 'package.json', 'README.md', 'AGENTS.md', 'THIRD_PARTY_NOTICES.txt']) await fs.cp(path.resolve(item), path.join(staging, item), { recursive: true });
   const target = path.join(releaseRoot, 'resources/app.asar');
   const temporary = path.join(releaseRoot, 'resources', `app-${randomUUID()}.asar`);
   const { createPackage } = await import('@electron/asar');
@@ -49,6 +53,10 @@ if (existsSync(path.join(releaseRoot, 'Typora Replica.exe'))) {
 const filename = `electron-v${electronVersion}-win32-x64.zip`;
 const checksum = JSON.parse(readFileSync('node_modules/electron/checksums.json', 'utf8'))[filename];
 const electronZipDir = ['node_modules/electron/mirror-cache', 'node_modules/electron'].find(directory => existsSync(`${directory}/${filename}`) && createHash('sha256').update(readFileSync(`${directory}/${filename}`)).digest('hex') === checksum);
-const paths = await packager({ dir: '.', out: 'release', name: 'Typora Replica', platform: 'win32', arch: 'x64', electronZipDir, asar: true, overwrite: false, executableName: 'Typora Replica', icon: 'assets/replica.ico', prune: false, ignore: [/^\/node_modules/, /^\/release/, /^\/test-results/, /^\/playwright-report/, /^\/\.test-data/, /^\/tests/, /^\/src/, /^\/electron/, /^\/scripts/, /^\/shared/, /^\/\.git/, /^\/playwright\.config/, /^\/tsconfig/], appCopyright: 'Typora Replica contributors', win32metadata: { ProductName: 'Typora Replica', FileDescription: 'Typora Replica Markdown 编辑器', CompanyName: 'Typora Replica', OriginalFilename: 'Typora Replica.exe' } });
-for (const directory of paths) { await brandExecutable(path.join(directory, 'Typora Replica.exe')); await fs.copyFile('assets/replica.ico', path.join(directory, 'moye.ico')); }
+const paths = await packager({ dir: staging, out: path.resolve('release'), name: 'Typora Replica', platform: 'win32', arch: 'x64', electronVersion, electronZipDir, asar: true, overwrite: false, executableName: 'Typora Replica', icon: path.resolve('assets/replica.ico'), prune: false });
+for (const directory of paths) {
+  await brandExecutable(path.join(directory, 'Typora Replica.exe'));
+  await fs.copyFile('assets/replica.ico', path.join(directory, 'moye.ico'));
+  await fs.copyFile('THIRD_PARTY_NOTICES.txt', path.join(directory, 'THIRD_PARTY_NOTICES.txt'));
+}
 console.log(paths.join('\n'));

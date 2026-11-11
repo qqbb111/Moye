@@ -2,6 +2,8 @@
 
 保留 Markdown 原文的 Windows 即时排版编辑器，面向中文写作、学习笔记与代码阅读。默认采用 WorkBuddy 深色排版，正文使用系统无衬线字体、代码使用内嵌 Source Code Pro；另保留文楷正文的浅色、夜间与 Copilot 深色主题，文档统一显示在可拖动标签栏。
 
+[下载 Windows x64 便携版](https://github.com/qqbb111/Moye/releases/latest) · 解压后运行 `Moye.exe`，无需安装 Node.js 或额外字体。
+
 ![编辑界面](docs/preview.png)
 
 ## 界面与 Windows 任务栏
@@ -16,11 +18,9 @@
 
 ## 直接运行
 
-双击项目根目录的 **启动Typora.bat**，或运行：
+从 [GitHub Releases](https://github.com/qqbb111/Moye/releases/latest) 下载 `Moye-…-windows-x64.zip`。解压整个目录后，双击 `Moye.exe`，也可以把 `.md` 文件拖到 EXE 上打开。
 
-`release/Typora Replica-win32-x64/Typora Replica.exe`
-
-便携版本已包含运行环境，无需安装 Node.js。移动软件时保留整个 `Typora Replica-win32-x64` 文件夹。可以把 `.md` 文件拖到 EXE 上打开。
+从源码构建时，双击项目根目录的 **启动Typora.bat**，或运行 `release/Typora Replica-win32-x64/Typora Replica.exe`。
 
 ## 写作与阅读体验
 
@@ -64,7 +64,7 @@ Source Code Pro 的 Regular／Bold／Italic 随程序附带，无需在系统安
 
 在 **设置 → 常规 → 主题** 选择 Copilot 深色。主题会随工作区保存，下次打开继续使用。
 
-这个主题使用低饱和的蓝灰背景、柔和引用色和一致的标题层次。正文中文采用霞鹜文楷，英文采用 Open Sans，代码优先使用 Fira Code／Cascadia Code／JetBrains Mono，中文注释采用文楷回退字体。字体从本机读取；其他电脑未安装时按顺序回退。
+这个主题使用低饱和的蓝灰背景、柔和引用色和一致的标题层次。浅色、夜间和 Copilot 深色主题随应用提供霞鹜文楷 Regular 1.530，离线可用。字体许可见 [SIL Open Font License 1.1](assets/fonts/LICENSE-LXGWWenKai.txt)。
 
 打开 [Copilot 排版示例](docs/Copilot排版示例.md) 可以与参考截图对照。独立主题样式位于 `src/themes/copilot.css`。
 
@@ -171,7 +171,7 @@ Windows 任务栏右键菜单的应用入口会新建空白墨页窗口；再次
 
 ## 与 Typora 的差异
 
-这是独立实现的 0.9.7 版本，保留常用的 Markdown 写作流程与快捷键，并独立改进代码阅读、导航与页面设计。与 Typora 的功能范围仍有差异：
+这是独立实现的 0.9.8 版本，保留常用的 Markdown 写作流程与快捷键，并独立改进代码阅读、导航与页面设计。与 Typora 的功能范围仍有差异：
 
 - Markdown 使用 remark/GFM，公式使用 KaTeX；Typora 特有语法、MathJax 宏和部分复杂嵌套排版可能有差别。
 - 暂未实现 Word/ePub 导出、Pandoc 工作流、任意 Typora 主题导入、完整图片云服务和全部偏好设置。

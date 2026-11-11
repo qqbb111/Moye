@@ -57,7 +57,7 @@
 :root[data-theme] .code-toolbar .code-copy[data-copied='true'] { color: #a9d7b4; opacity: 1; }
 .code-content { min-width: 0; }
 :root[data-theme] .code-content .cm-scroller {
-  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, '霞鹜文楷', 'LXGW WenKai', monospace !important;
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, var(--wenkai-font), monospace !important;
   font-size: max(13px, calc(var(--font-size) * .9)); line-height: 1.7 !important;
   overflow-x: auto !important; overscroll-behavior-x: contain; tab-size: 4;
 }

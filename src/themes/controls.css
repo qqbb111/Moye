@@ -26,11 +26,20 @@ details[open] > summary .tree-chevron { transform: rotate(90deg); }
 .menu-check { display: inline-flex; align-items: center; justify-content: center; }
 #tabbar.drag-over { box-shadow: none; }
 
+@font-face {
+  font-family: 'Moye WenKai';
+  src: url('../../assets/fonts/LXGWWenKai-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 /* Shared chrome and page rhythm. UI lettering stays neutral; prose uses WenKai. */
 :root {
   --ui-control-height: 34px; --ui-button-height: 32px; --ui-radius: 6px; --ui-motion-fast: 120ms;
   --ui-font: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
-  --prose-font: 'Open Sans', '霞鹜文楷', 'LXGW WenKai', 'Microsoft YaHei UI', sans-serif;
+  --wenkai-font: 'Moye WenKai', '霞鹜文楷', 'LXGW WenKai';
+  --prose-font: 'Open Sans', var(--wenkai-font), 'Microsoft YaHei UI', sans-serif;
   --bg: #fbfaf7; --fg: #343c3c; --muted: #737e7c; --surface: #f1f1ed;
   --border: #dfe3df; --hover: #e6ebe6; --link: #47786b; --code: #edf0ea;
   --accent-soft: #dfece4; --chrome: #f5f5f0; --selection: #8dbda74d; --highlight-tint: #a97e4b;
