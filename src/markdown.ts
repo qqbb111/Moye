@@ -24,11 +24,16 @@ export function walk(node: MarkdownNode, visitor: (node: MarkdownNode, parent?: 
   visitor(node, parent); for (const child of node.children ?? []) walk(child, visitor, node);
 }
 export function plainText(node: MarkdownNode): string { return node.value ?? (node.children ?? []).map(plainText).join(''); }
+function headingLabel(node: MarkdownNode): string {
+  if (node.type === 'text') return (node.value ?? '').replace(/==([^=\n]+)==/g, '$1');
+  if (node.type === 'html' && /^<\/?mark>$/i.test(node.value ?? '')) return '';
+  return node.value ?? (node.children ?? []).map(headingLabel).join('');
+}
 export function headings(source: string) {
   const result: Array<{ level: number; text: string; offset: number; slug: string }> = []; const used = new Map<string, number>();
   walk(parseMarkdown(source), node => {
     if (node.type !== 'heading') return;
-    const text = plainText(node); const base = text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
+    const text = headingLabel(node); const base = text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
     const count = used.get(base) ?? 0; used.set(base, count + 1);
     result.push({ level: node.depth!, text, offset: startOf(node), slug: base + (count ? `-${count}` : '') });
   }); return result;

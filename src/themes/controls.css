@@ -106,6 +106,12 @@ details > summary:hover { background: var(--hover); }
 :root[data-theme] .md-strong, :root[data-theme] .md-strong span { font-weight: 700 !important; }
 :root[data-theme] .md-quote { color: var(--fg); background: color-mix(in srgb, var(--link) 7%, transparent); border-left: 3px solid color-mix(in srgb, var(--link) 50%, transparent); border-radius: 0 5px 5px 0; padding: 2px 16px !important; }
 .md-widget { padding: 18px 0; }
+.markdown-editor :is(.md-highlight, mark) {
+  color: inherit;
+  background-color: color-mix(in srgb, var(--ui-accent) 24%, transparent);
+  border-radius: .16em;
+  box-decoration-break: clone;
+}
 .markdown-editor .cm-selectionBackground { background: var(--selection) !important; }
 .cm-editor[data-source='true'] > .cm-scroller > .cm-content { font-size: .9em; }
 .workspace>main>footer { height: 32px; gap: 7px; padding: 0 14px; border-top: 1px solid var(--border); color: var(--muted); background: var(--bg); }

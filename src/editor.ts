@@ -451,7 +451,7 @@ function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): 
         if (!active(offset, offset + match[0].length)) { hide(offset, offset + length); hide(offset + match[0].length - length, offset + match[0].length); }
       }
     }
-    if (node.type === 'paragraph') for (const match of raw.matchAll(/<(u|sub|sup|mark)>([\s\S]*?)<\/\1>/g)) {
+    if (node.type === 'paragraph' || node.type === 'heading') for (const match of raw.matchAll(/<(u|sub|sup|mark)>([\s\S]*?)<\/\1>/g)) {
       const offset = from + match.index!; const opening = match[1].length + 2; const closing = opening + 1;
       mark(offset + opening, offset + match[0].length - closing, { u: 'md-underline', sub: 'md-sub', sup: 'md-sup', mark: 'md-highlight' }[match[1]]!);
     }

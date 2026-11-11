@@ -765,6 +765,27 @@ test('输入转换、列表延续、格式快捷键、查找和菜单剪贴板',
   } finally { await application.close(); }
 });
 
+test('大纲与目录隐藏标题高亮标记，正文高亮随主题更新', async () => {
+  const { application, page } = await launch();
+  const raw = '[toc]\n\n## ==重点== 与 `a == b == c`\n\n## <mark>例题</mark>\n\n正文 ==结论==。\n';
+  try {
+    await setContent(page, raw);
+    await page.evaluate(() => { const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor: editor.content.length } }); });
+    await execute(page, 'outline');
+    const titles = ['重点 与 a == b == c', '例题'];
+    await expect(page.locator('#sidebar-content .sidebar-row')).toHaveText(titles);
+    await expect(current(page).locator('.md-toc button')).toHaveText(titles);
+    await page.locator('#sidebar-content .sidebar-row').last().click();
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(raw.indexOf('## <mark>'));
+    const highlights = current(page).locator('.md-heading .md-highlight');
+    await expect(highlights).toHaveText(['重点', '例题']);
+    const dark = await highlights.first().evaluate(el => getComputedStyle(el).backgroundColor);
+    await execute(page, 'light');
+    await expect(highlights.first()).not.toHaveCSS('background-color', dark);
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
 test('目录随标题更新、脚注、YAML 元数据和 Mermaid 预览', async () => {
   const { application, page } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
