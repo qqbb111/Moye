@@ -5,13 +5,14 @@ import { watch, type FSWatcher } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DocumentStore, FileConflictError, atomicWrite } from './store';
-import type { ActionResult, AppCommand, SaveMode } from '../shared/types';
+import type { ActionResult, AppCommand, SaveMode, UpdateAction } from '../shared/types';
 import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
 import { repairWindowsShortcuts } from './windows-integration';
 import { PdfPreviews } from './pdf';
 import { validatePrintOptions, printPreferences } from '../shared/print';
+import { PortableUpdates } from './portable-updates';
 
 app.setName(APP_NAME);
 const appId = APP_ID;
@@ -35,6 +36,11 @@ const devUrl = process.env.TYPORA_REPLICA_DEV_URL;
 const assetRoot = path.resolve(__dirname, '../dist');
 let quitting = false;
 let quitInProgress = false;
+let updateRequest = (url: string, options: RequestInit) => net.fetch(url, options);
+const updates = new PortableUpdates({ version: app.getVersion(), executable: process.execPath, userData: app.getPath('userData'),
+  supported: app.isPackaged && process.platform === 'win32' && process.arch === 'x64', request: (url, options) => updateRequest(url, options),
+  changed: state => { for (const window of windows.values()) if (!window.isDestroyed()) window.webContents.send('update:state', state); },
+});
 const codeTheme = new VscodeThemeSync(() => publish());
 function workspaceView(id: string) { return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: store.preferences.codeTheme === 'vscode' ? codeTheme.current : store.preferences.codeTheme === 'github-dark' ? GITHUB_DARK : MODERN_DARK }; }
 function newBlankWindow() { const id = store.newWindow(); store.newDocument(id); return createWindow(id); }
@@ -63,11 +69,11 @@ function windowIdOf(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) 
   return entry[0];
 }
 function requireOwned(windowId: string, id: string) { if (typeof id !== 'string' || store.owner(id) !== windowId) throw new Error('找不到当前窗口中的文档'); }
-async function collectEdits(window: BrowserWindow) {
+async function collectEdits(window: BrowserWindow, required = false) {
   if (window.isDestroyed() || window.webContents.isCrashed()) return;
   const token = randomUUID();
-  await new Promise<void>(resolve => {
-    const timer = setTimeout(() => { pendingClose.delete(token); resolve(); }, 5000);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => { pendingClose.delete(token); if (required) reject(new Error('窗口未确认草稿已保存')); else resolve(); }, 5000);
     pendingClose.set(token, { sender: window.webContents.id, resolve: () => { clearTimeout(timer); pendingClose.delete(token); resolve(); } });
     window.webContents.send('window:prepare-close', token);
   });
@@ -113,6 +119,22 @@ async function openFile(windowId: string, file: string) {
   if (result.windowId !== windowId) notify(windows.get(windowId)!, '这份文件已经在另一个窗口打开，已切换到那个窗口。');
 }
 function registerIpc() {
+  ipcMain.handle('update:portable', async (event, action: UpdateAction) => {
+    windowIdOf(event);
+    if (action === 'check') await updates.check();
+    else if (action === 'download') await updates.download();
+    else if (action === 'cancel') updates.cancel();
+    else if (action === 'install' && !quitInProgress && !quitting) {
+      quitInProgress = true;
+      const installed = await updates.install(async () => {
+        await Promise.all([...windows.values()].map(window => collectEdits(window, true)));
+        await store.flush();
+      });
+      if (installed) { quitting = true; app.quit(); }
+      else quitInProgress = false;
+    }
+    return updates.state;
+  });
   ipcMain.handle('pdf:preview', async (event, documentId: string, html: string, options, requestId?: string) => {
     try {
       const owner = windowIdOf(event); requireOwned(owner, documentId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('打印文档过大');
@@ -280,14 +302,14 @@ else {
       void repairWindowsShortcuts(shell, process.execPath, app.getPath('appData'), appIconPath).catch(error => console.error('Shortcut repair:', error));
       app.setUserTasks([{ program: process.execPath, arguments: '--new-window', iconPath: appIconPath, iconIndex: 0, title: '新建窗口', description: '新建一个墨页窗口' }]);
     }
-    await store.initialize(); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
+    await store.initialize(); await updates.takeResult(); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
     await registerProtocols(); registerIpc(); installMenu();
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     if (!store.windows.size) { const id = store.newWindow(); store.newDocument(id); }
     for (const id of store.windows.keys()) createWindow(id);
     if (process.argv.includes('--new-window') && [...store.documents.values()].some(doc => doc.path || doc.content)) newBlankWindow();
-    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts, pdfPreviews };
+    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts, pdfPreviews, setUpdateRequest: (request: typeof updateRequest) => { updateRequest = request; } };
     const target = process.argv.includes('--new-window') ? [...windows.keys()].at(-1)! : [...windows.keys()][0]; for (const file of initialFiles) await openFile(target, file).catch(error => notify(windows.get(target)!, error.message));
     launchReady = true; for (const request of queuedLaunches.splice(0)) handleLaunch(request.argv, request.cwd);
   }).catch(error => { console.error(error); dialog.showErrorBox(`${APP_NAME} 无法启动`, error.message); app.exit(1); });
@@ -297,9 +319,9 @@ else {
     if (quitInProgress) return;
     quitInProgress = true;
     void (async () => {
-      try { await Promise.all([...windows.values()].map(collectEdits)); await store.flush(); quitting = true; app.quit(); }
+      try { await Promise.all([...windows.values()].map(window => collectEdits(window))); await store.flush(); await updates.discard(); quitting = true; app.quit(); }
       catch (error) { quitInProgress = false; store.onError(`无法保存恢复记录，请先手动保存文档：${(error as Error).message}`); }
     })();
   });
-  app.on('window-all-closed', () => { quitting = true; codeTheme.stop(); for (const item of fileWatchers.values()) { item.watcher.close(); clearTimeout(item.timer); } store.dispose(); app.quit(); });
+  app.on('window-all-closed', () => { quitting = true; codeTheme.stop(); for (const item of fileWatchers.values()) { item.watcher.close(); clearTimeout(item.timer); } store.dispose(); void updates.discard().finally(() => app.quit()); });
 }

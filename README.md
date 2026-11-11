@@ -22,6 +22,8 @@
 
 从源码构建时，双击项目根目录的 **启动Typora.bat**，或运行 `release/Typora Replica-win32-x64/Typora Replica.exe`。
 
+从 0.9.9 起，在「设置 → 关于 → 检查更新」可查看 GitHub 上的最新正式版、下载并校验更新。点击「保存草稿并重启」后，墨页保存各窗口的编辑状态，在原目录更新程序并重新打开。0.9.8 用户需手动下载一次支持更新的新版本。
+
 ## 写作与阅读体验
 
 - **代码按原来的结构阅读**：WorkBuddy 预设默认折行并保留续行缩进；右上角换行按钮或代码内 `Alt+Z` 可切换为块内独立横向滚动。切换只改变显示，不改写代码，也不占用撤销记录。设置会在重启后保留。
@@ -171,7 +173,7 @@ Windows 任务栏右键菜单的应用入口会新建空白墨页窗口；再次
 
 ## 与 Typora 的差异
 
-这是独立实现的 0.9.8 版本，保留常用的 Markdown 写作流程与快捷键，并独立改进代码阅读、导航与页面设计。与 Typora 的功能范围仍有差异：
+这是独立实现的 0.9.9 版本，保留常用的 Markdown 写作流程与快捷键，并独立改进代码阅读、导航与页面设计。与 Typora 的功能范围仍有差异：
 
 - Markdown 使用 remark/GFM，公式使用 KaTeX；Typora 特有语法、MathJax 宏和部分复杂嵌套排版可能有差别。
 - 暂未实现 Word/ePub 导出、Pandoc 工作流、任意 Typora 主题导入、完整图片云服务和全部偏好设置。
@@ -202,6 +204,8 @@ node scripts/smoke-replica.mjs
 源码：`src/editor.ts` 为编辑核心，`src/main.ts` 为界面与菜单，`electron/store.ts` 为文档和恢复存储。原有 Rypota 项目保留在原目录。
 
 写作与附件的发布验证可运行 `node scripts/smoke-writing.mjs --packaged`。构建会记录本次渲染产物清单，打包仅将当前产物装入新归档。需要先验证再替换正在使用的版本时，可以运行 `node scripts/package.mjs --prepare-only` 准备归档，并在验证后更新固定发布目录。
+
+公开发布时运行 `npm run package:zip`。将生成的 `Moye-<版本>-windows-x64.zip` 按原名上传到对应 `v<版本>` 的正式 GitHub Release，再公开发布。更新器使用 GitHub 附件记录中的 SHA-256 校验 ZIP。
 
 光标坐标、词尾加粗、中文相邻排版、标题回车和保存的专项验证可运行 `node scripts/smoke-editing.mjs`；加 `--packaged` 验证便携版实际 EXE。布局诊断脚本为 `scripts/debug-editing.mjs`。
 

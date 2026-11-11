@@ -1,5 +1,5 @@
 import { COMMANDS, commandKeys, normalizeShortcut, shortcutConflict, shortcutFromEvent, validateShortcuts, type ShortcutOverrides } from '../shared/commands';
-import type { WorkspaceView, ActionResult } from '../shared/types';
+import type { WorkspaceView, ActionResult, UpdateAction, UpdateState } from '../shared/types';
 import { icon } from './icons';
 import { APP_NAME } from '../shared/branding';
 import { version } from '../package.json';
@@ -16,6 +16,7 @@ export class Settings {
   private range: Range | null = null;
   private cellSelection: { from: number; to: number } | null = null;
   private contextDocument: string | null = null;
+  private updateState: UpdateState = { phase: 'idle' };
   constructor(private host: { current(): WorkspaceView; execute(id: string): Promise<void>; save(value: Partial<Preferences>): Promise<ActionResult>; focus(): void }) {
     this.dialog = document.createElement('dialog'); this.dialog.id = 'preferences'; this.dialog.setAttribute('aria-label', '设置');
     this.dialog.innerHTML = `<header class="settings-header"><h2>设置</h2><button type="button" id="settings-close" aria-label="关闭设置">${icon('close')}</button></header>
@@ -34,7 +35,7 @@ export class Settings {
         <div id="format-save-help" popover role="tooltip">整理中英文间距和常见标点；代码、公式、地址保持原样。</div>
         <div id="settings-shortcut-tools" hidden><input id="shortcut-search" type="search" placeholder="搜索操作或快捷键" aria-label="搜索快捷键"><button type="button" id="shortcut-reset-all">恢复全部默认</button></div>
         <div id="settings-commands"></div>
-        <div id="settings-about" hidden><h3>${APP_NAME}</h3><p>版本 ${version}</p><button type="button" data-settings-command="guide">Markdown 使用指南</button></div>
+        <div id="settings-about" hidden><h3>${APP_NAME}</h3><div class="about-version"><span>版本 ${version}</span><button type="button" id="check-update">检查更新</button></div><p id="update-status" role="status" hidden></p><progress id="update-progress" aria-label="更新下载进度" max="100" hidden></progress><button type="button" data-settings-command="guide">Markdown 使用指南</button></div>
       </section>
       <footer class="settings-footer"><span id="shortcut-message" role="status"></span><button type="button" value="cancel" id="settings-cancel">取消</button><button type="button" id="preferences-apply">应用</button></footer>`;
     document.body.append(this.dialog);
@@ -48,6 +49,9 @@ export class Settings {
     });
     this.get<HTMLButtonElement>('#settings-close').onclick = this.get<HTMLButtonElement>('#settings-cancel').onclick = () => this.dialog.close();
     this.get<HTMLButtonElement>('#preferences-apply').onclick = () => void this.apply();
+    this.get<HTMLButtonElement>('#check-update').onclick = () => void this.performUpdate();
+    window.rypota.onPortableUpdate(state => this.renderUpdate(state));
+    void window.rypota.portableUpdate('status').then(state => this.renderUpdate(state)).catch(() => {});
     this.get<HTMLInputElement>('#shortcut-search').oninput = () => this.renderCommands();
     this.get<HTMLButtonElement>('#shortcut-reset-all').onclick = () => { this.shortcuts = {}; this.recording = null; this.message(''); this.renderCommands(); };
     this.dialog.querySelectorAll<HTMLButtonElement>('[data-settings-command]').forEach(button => button.onclick = () => this.run(button.dataset.settingsCommand!));
@@ -60,6 +64,28 @@ export class Settings {
     this.get('#format-save-help').addEventListener('beforetoggle', event => { if ((event as ToggleEvent).newState === 'open') { const rect = this.get('#format-save-info').getBoundingClientRect(); const help = this.get('#format-save-help'); help.style.left = `${Math.min(rect.left, innerWidth - 300)}px`; help.style.top = `${rect.bottom + 8}px`; } });
   }
   private get<T extends HTMLElement>(selector: string) { return this.dialog.querySelector<T>(selector)!; }
+  private async performUpdate() {
+    const actions: Partial<Record<UpdateState['phase'], UpdateAction>> = { idle: 'check', current: 'check', error: 'check', available: 'download', downloading: 'cancel', ready: 'install' };
+    const action = actions[this.updateState.phase];
+    if (!action) return;
+    try { this.renderUpdate(await window.rypota.portableUpdate(action)); }
+    catch { this.renderUpdate({ phase: 'error', message: '无法更新，请重试。' }); }
+  }
+  private renderUpdate(state: UpdateState) {
+    this.updateState = state;
+    const button = this.get<HTMLButtonElement>('#check-update');
+    const progress = this.get<HTMLProgressElement>('#update-progress');
+    const status = this.get('#update-status');
+    const labels: Partial<Record<UpdateState['phase'], string>> = { checking: '正在检查…', available: '下载更新', downloading: '取消下载', preparing: '正在校验…', ready: '保存草稿并重启', installing: '正在重启…' };
+    const messages: Partial<Record<UpdateState['phase'], string>> = { current: '当前已是最新版。', available: `发现新版本 ${state.version}`, downloading: `正在下载 ${state.version}`, ready: `${state.version} 已就绪。更新会关闭所有墨页窗口。` };
+    button.textContent = labels[state.phase] ?? '检查更新';
+    button.disabled = ['checking', 'preparing', 'installing', 'unsupported'].includes(state.phase);
+    progress.hidden = state.phase !== 'downloading';
+    if (!progress.hidden) progress.value = state.percent ?? 0;
+    const message = state.message ?? messages[state.phase] ?? '';
+    if (status.textContent !== message) status.textContent = message;
+    status.hidden = !message;
+  }
   open(section = '常规') {
     if (this.dialog.open) return;
     this.contextDocument = this.host.current().activeId;

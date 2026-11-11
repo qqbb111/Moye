@@ -35,8 +35,14 @@
 #preferences .settings-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: auto; min-height: 68px; padding: 14px 26px; border-top: 1px solid var(--border); background: var(--bg); }
 #preferences .settings-footer > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 76px; height: 32px; padding: 0 16px; font: 500 13px/1 var(--ui-font); border-radius: 6px; }
 #shortcut-message { flex: 1; font-size: 12px; line-height: 1.5; color: var(--ui-accent); }
-#settings-about { padding: 20px 8px; }
+#settings-about { max-width: 460px; padding: 20px 8px; }
 #settings-about h3 { font-size: 22px; font-weight: 600; }
+.about-version { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; min-height: 44px; }
+#check-update { min-height: var(--ui-button-height); padding: 0 12px; color: var(--ui-accent); background: var(--ui-accent-soft); border-radius: var(--ui-radius); }
+#check-update:not(:disabled):hover { border-color: var(--ui-accent); }
+#update-status { margin: 6px 0 0; }
+#update-progress { width: 100%; height: 8px; margin-top: 8px; }
+#settings-about [data-settings-command='guide'] { margin-top: 16px; }
 @media (max-width: 700px) {
   #preferences { width: calc(100vw - 20px); height: calc(100vh - 28px); }
   .settings-tabs { padding-left: 12px; padding-right: 12px; }

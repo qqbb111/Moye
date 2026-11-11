@@ -1,7 +1,7 @@
 {
   "name": "typora-replica",
   "productName": "墨页 Moye",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "private": true,
   "description": "保留 Markdown 原文的即时排版桌面编辑器",
   "main": "dist-electron/main.cjs",
@@ -12,7 +12,8 @@
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "verify": "npm run build && npm test && npm run test:e2e",
-    "package": "npm run build && node scripts/package.mjs"
+    "package": "npm run build && node scripts/package.mjs",
+    "package:zip": "npm run build && node scripts/package.mjs --zip"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",

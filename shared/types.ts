@@ -32,6 +32,13 @@ export type AppCommand = string;
 export interface FolderEntry { name: string; path: string; directory: boolean }
 export interface ActionResult { ok: boolean; message?: string; canceled?: boolean; conflict?: boolean }
 export type SaveMode = 'save' | 'save-as' | 'overwrite-conflict';
+export type UpdateAction = 'status' | 'check' | 'download' | 'cancel' | 'install';
+export interface UpdateState {
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'preparing' | 'ready' | 'installing' | 'error' | 'unsupported';
+  version?: string;
+  percent?: number;
+  message?: string;
+}
 export interface RypotaBridge {
   bootstrap(): Promise<WorkspaceView>;
   newDocument(): Promise<ActionResult>;
@@ -48,6 +55,8 @@ export interface RypotaBridge {
   detachDocument(id: string): Promise<ActionResult>;
   updatePreferences(preferences: Partial<WorkspaceView['preferences']>): Promise<ActionResult>;
   refreshCodeTheme(): Promise<ActionResult>;
+  portableUpdate(action: UpdateAction): Promise<UpdateState>;
+  onPortableUpdate(listener: (state: UpdateState) => void): () => void;
   windowControl(action: 'minimize' | 'maximize' | 'close'): void;
   openExternal(url: string): Promise<ActionResult>;
   openFolder(): Promise<{ path: string; entries: FolderEntry[] } | null>;
