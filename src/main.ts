@@ -19,7 +19,7 @@ import { Settings } from './settings';
 import { COMMANDS, commandKeys, shortcutFromEvent } from '../shared/commands';
 import { selectLine } from '@codemirror/commands';
 import { headings } from './markdown';
-import type { WorkspaceView, DocumentView, ActionResult, FolderEntry } from '../shared/types';
+import type { WorkspaceView, DocumentView, ActionResult, FolderEntry, SaveMode } from '../shared/types';
 
 const bridge = window.rypota;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -27,17 +27,29 @@ const app = $('#app');
 app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作"><span class="menu-spacer"></span><button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
   <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-heading"><strong id="folder-name">文档</strong></div><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><label class="sidebar-filter">${icon('search')}<input id="sidebar-filter" type="search" aria-label="筛选侧栏" placeholder="筛选当前列表…" autocomplete="off"></label><div id="sidebar-content"></div></aside><div id="sidebar-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="256" tabindex="0" hidden></div>
   <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="word-count" title="字数统计">0 字</button></footer></main></div>
-  <div id="menu" role="menu" hidden></div><div id="toast" role="status" hidden></div>
+  <div id="menu" role="menu" aria-label="编辑操作" hidden></div><div id="toast" role="status" hidden></div>
+  <dialog id="save-conflict" aria-labelledby="save-conflict-title" aria-describedby="save-conflict-detail"><h2 id="save-conflict-title">磁盘文件已变更</h2><p id="save-conflict-detail">覆盖会替换磁盘上的版本。当前编辑已保留为草稿。</p><div class="dialog-buttons"><button value="cancel" autofocus>取消</button><button value="overwrite-conflict">覆盖磁盘文件</button><button value="save-as">另存为…</button></div></dialog>
   <dialog id="quick-open" aria-label="快速打开" closedby="any"><div class="quick-search">${icon('search')}<input id="quick-input" placeholder="搜索文件名或路径" aria-label="快速打开文件名" role="combobox" aria-controls="quick-results" aria-expanded="true" aria-autocomplete="list" autocomplete="off"></div><div id="quick-results" role="listbox" aria-label="文件搜索结果"></div></dialog>
 `;
 
 let workspace: WorkspaceView;
 const settings = new Settings({ current: () => workspace, execute, save: value => bridge.updatePreferences(value), focus: () => activeEditor()?.focus() });
+const saveConflict = $<HTMLDialogElement>('#save-conflict');
+let resolveSaveConflict: ((value: string) => void) | undefined;
+function closeSaveConflict(value: string) {
+  saveConflict.close();
+  const resolve = resolveSaveConflict;
+  resolveSaveConflict = undefined;
+  resolve?.(value);
+}
+for (const button of saveConflict.querySelectorAll('button')) button.onclick = () => closeSaveConflict(button.value);
+saveConflict.addEventListener('cancel', event => { event.preventDefault(); closeSaveConflict('cancel'); });
 let printPreview: import('./print-preview').PrintPreview | undefined;
 let library = 'outline'; let folder: { path: string; entries: FolderEntry[] } | null = null;
 const slots = new Map<string, { element: HTMLElement; editor: MarkdownEditor; applying: boolean }>();
 const pendingImages = new Set<Promise<void>>();
-let toastTimer: ReturnType<typeof setTimeout>; let renderPending = false; let openedMenu = -1;
+let toastTimer: ReturnType<typeof setTimeout>; let renderPending = false;
+let menuOrigin: { element: HTMLElement; selection?: [number, number] } | undefined;
 let tabSignature = ''; let draggedTab: string | null = null;
 let measuredAppearance = '';
 let sidebarSignature = ''; let resizingSidebar = false; let quickSelection = 0;
@@ -339,7 +351,78 @@ function renderTree(container: HTMLElement, entries: FolderEntry[], depth: numbe
     }
   }
 }
-function hideMenu() { $('#menu').hidden = true; openedMenu = -1; }
+function hideMenu(restoreFocus = false) {
+  const origin = menuOrigin;
+  menuOrigin = undefined;
+  $('#menu').hidden = true;
+  if (!restoreFocus || !origin?.element.isConnected || document.activeElement === origin.element) return;
+  origin.element.focus({ preventScroll: true });
+  const text = origin.element.firstChild;
+  if (origin.selection && text instanceof Text) {
+    const [anchor, head] = origin.selection;
+    window.getSelection()?.setBaseAndExtent(text, Math.min(anchor, text.length), text, Math.min(head, text.length));
+  }
+}
+function openContextMenu(target: Element, x: number, y: number, keyboard = false) {
+  const menu = $('#menu');
+  const focused = document.activeElement as HTMLElement;
+  const cell = target.closest<HTMLElement>('th,td');
+  if (cell && focused !== cell) cell.focus({ preventScroll: true });
+  const origin = document.activeElement as HTMLElement;
+  menuOrigin = { element: origin };
+  const selection = window.getSelection();
+  if (cell && selection?.anchorNode && selection.focusNode && cell.contains(selection.anchorNode) && cell.contains(selection.focusNode)) {
+    const offset = (node: Node, position: number) => {
+      const range = document.createRange(); range.selectNodeContents(cell); range.setEnd(node, position); return range.toString().length;
+    };
+    menuOrigin.selection = [offset(selection.anchorNode, selection.anchorOffset), offset(selection.focusNode, selection.focusOffset)];
+  }
+  menu.replaceChildren();
+  const item = (label: string, action: () => void, disabled = false) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.role = 'menuitem'; button.tabIndex = -1;
+    button.textContent = label; button.disabled = disabled;
+    button.onmousedown = event => event.preventDefault();
+    button.onclick = () => { hideMenu(true); action(); };
+    menu.append(button);
+  };
+  const separate = () => { const separator = document.createElement('hr'); separator.role = 'separator'; menu.append(separator); };
+  const table = target.closest('.md-table');
+  if (table) {
+    for (const button of table.querySelectorAll<HTMLButtonElement>('.table-toolbar button')) item(button.title, () => button.click(), button.disabled);
+    separate();
+  }
+  const textField = origin.matches('input,textarea') && !!origin.closest('#editor-stage');
+  for (const [label, action] of [['剪切', 'cut'], ['复制', 'copy'], ['粘贴', 'paste'], ['全选', 'select-all']]) {
+    item(label, () => {
+      if (!textField) void execute(action);
+      else if (action === 'paste') void run(() => bridge.paste());
+      else document.execCommand(action === 'select-all' ? 'selectAll' : action);
+    });
+  }
+  if (!textField) {
+    separate();
+    for (const [label, action] of [['加粗', 'bold'], ['斜体', 'italic'], ['超链接', 'link']]) item(label, () => void execute(action));
+  }
+  menu.hidden = false;
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(6, Math.min(x, innerWidth - width - 6))}px`;
+  menu.style.top = `${Math.max(6, Math.min(y, innerHeight - height - 6))}px`;
+  if (keyboard) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+}
+async function saveDocument(id: string, mode: SaveMode) {
+  await run(async () => {
+    const result = await bridge.saveDocument(id, mode);
+    if (!result.conflict) return result;
+    if (saveConflict.open || !workspace.documents.some(doc => doc.id === id)) return { ok: false, canceled: true };
+    const closed = new Promise<string>(resolve => { resolveSaveConflict = resolve; });
+    saveConflict.showModal();
+    const choice = await closed;
+    if (choice === 'save-as' || choice === 'overwrite-conflict') return bridge.saveDocument(id, choice);
+    return { ok: false, canceled: true };
+  });
+  if (!document.querySelector('dialog[open]')) activeEditor()?.focus();
+}
 function preferences() { settings.open(); }
 function quickOpen() { $<HTMLDialogElement>('#quick-open').showModal(); reveal($('#quick-open'), 4); $<HTMLInputElement>('#quick-input').value = ''; renderQuick(); $<HTMLInputElement>('#quick-input').focus(); }
 function paintQuickSelection() {
@@ -380,7 +463,7 @@ async function execute(action: string, value?: string) {
   const doc = activeDocument(); const editor = activeEditor();
   if (['new', 'open', 'save', 'save-as', 'close-tab', 'detach', 'new-window', 'export-html', 'export-pdf'].includes(action)) flushAll();
   if (action === 'new') return run(() => bridge.newDocument()); if (action === 'open') return run(() => bridge.openDocuments());
-  if (action === 'save' || action === 'save-as') { if (doc) return run(() => bridge.saveDocument(doc.id, action === 'save-as')); return; }
+  if (action === 'save' || action === 'save-as') { if (doc) return saveDocument(doc.id, action); return; }
   if (action === 'close-tab') { if (doc) return run(() => bridge.closeDocument(doc.id)); return; }
   if (action === 'new-window') return run(() => bridge.newWindow()); if (action === 'detach' && doc) return run(() => bridge.detachDocument(doc.id));
   if (action === 'recent' && value) return run(() => bridge.openRecent(value));
@@ -454,14 +537,28 @@ document.addEventListener('compositionend', () => { compositionTarget = null; },
 document.addEventListener('keydown', event => {
   if (!workspace) return;
   if (document.querySelector('dialog[open]')) return;
-  if (event.key === 'Escape') { hideMenu(); return; }
-  if (!$('#menu').hidden && ['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) {
-    event.preventDefault(); event.stopImmediatePropagation();
-    const buttons = [...$('#menu').querySelectorAll<HTMLButtonElement>('button')], i = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === 'Enter') (document.activeElement as HTMLElement)?.click(); else buttons[(i + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+  const target = document.activeElement as HTMLElement | null;
+  const menu = $('#menu');
+  if (!menu.hidden) {
+    if (event.key === 'Tab') { hideMenu(true); return; }
+    if (['Escape', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (event.key === 'Escape') { hideMenu(true); return; }
+      const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+      const index = buttons.indexOf(target as HTMLButtonElement);
+      if (event.key === 'Enter' || event.key === ' ') { if (index < 0) buttons[0]?.focus(); else buttons[index]?.click(); return; }
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : event.key === 'ArrowDown' ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
+      buttons[(next + buttons.length) % buttons.length]?.focus();
+    } else hideMenu(true);
     return;
   }
-  const target = document.activeElement as HTMLElement | null;
+  if (target?.closest('#editor-stage') && !event.isComposing && !compositionTarget && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const selected = window.getSelection();
+    const bounds = selected?.rangeCount && target.contains(selected.anchorNode) ? selected.getRangeAt(0).getBoundingClientRect() : target.getBoundingClientRect();
+    openContextMenu(target, bounds.left, bounds.bottom, true);
+    return;
+  }
   const focusedView = target?.closest('.cm-content') ? EditorView.findFromDOM(target) : undefined;
   const key = shortcutFromEvent(event); if (!key) return;
   if (compositionTarget || (key !== '=' && (event.isComposing || focusedView?.composing || activeEditor()?.view.composing))) return;
@@ -491,11 +588,8 @@ document.addEventListener('keydown', event => {
   event.preventDefault(); event.stopImmediatePropagation(); void execute(command.id);
 }, true);
 $('#editor-stage').addEventListener('contextmenu', event => {
-  event.preventDefault(); const menu = $('#menu'); menu.replaceChildren(); openedMenu = -2;
-  const table = (event.target as HTMLElement).closest('.md-table'); const items: Array<[string, () => void]> = table ? [...table.querySelectorAll<HTMLButtonElement>('.table-toolbar button')].map(button => [button.title, () => button.click()]) : [];
-  items.push(...[['剪切', 'cut'], ['复制', 'copy'], ['粘贴', 'paste'], ['全选', 'select-all'], ['加粗', 'bold'], ['斜体', 'italic'], ['超链接', 'link']].map(([label, action]) => [label, () => void execute(action)] as [string, () => void]));
-  for (const [label, action] of items) { const button = document.createElement('button'); button.textContent = label; button.style.paddingLeft = '20px'; button.onmousedown = event => event.preventDefault(); button.onclick = () => { hideMenu(); action(); }; menu.append(button); }
-  menu.style.left = `${Math.min(event.clientX, innerWidth - 290)}px`; menu.style.top = `${Math.min(event.clientY, innerHeight - items.length * 29 - 12)}px`; menu.hidden = false;
+  event.preventDefault();
+  openContextMenu(event.target as Element, event.clientX, event.clientY);
 });
 for (const button of document.querySelectorAll<HTMLElement>('[data-control]')) button.onclick = () => bridge.windowControl(button.dataset.control as 'minimize' | 'maximize' | 'close');
 for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) button.onclick = () => { const next = button.dataset.library!; if (library === next) return; library = next; $<HTMLInputElement>('#sidebar-filter').value = ''; renderSidebar(); reveal($('#sidebar-content'), 3); };

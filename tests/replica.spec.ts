@@ -91,6 +91,68 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
   } finally { await application.close(); }
 });
 
+test('编辑器右键菜单跟随主题，键盘复制保留表格选区', async () => {
+  const { application, page } = await launch();
+  try {
+    await setContent(page, '正文\n\n| 标题 |\n| --- |\n| 表格选区 |');
+    const cell = current(page).locator('.md-table td').first();
+    await cell.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: '编辑操作' });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: '删除当前列' })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(cell).toBeFocused();
+    await cell.evaluate(element => window.getSelection()?.setBaseAndExtent(element.firstChild!, 1, element.firstChild!, 3));
+
+    await page.keyboard.press('Shift+F10');
+    await expect(menu.getByRole('menuitem', { name: '在当前行后插入一行' })).toBeFocused();
+    await expect(menu.locator(':focus-visible')).toHaveCSS('outline-color', 'rgb(175, 209, 191)');
+    await page.keyboard.press('End');
+    for (let step = 0; step < 5; step++) await page.keyboard.press('ArrowUp');
+    await expect(menu.getByRole('menuitem', { name: '复制', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeHidden();
+    await expect(cell).toBeFocused();
+    expect(await page.evaluate(() => window.rypota.clipboard('read'))).toBe('格选');
+  } finally { await application.close(); }
+});
+
+test('文件冲突使用应用弹窗，取消保留两份内容并可另存或确认覆盖', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const original = path.join(directory, '原始.md');
+    const copy = path.join(directory, '副本.md');
+    const save = () => page.evaluate(() => { void (window as any).__editor.execute('save'); });
+    await fs.writeFile(original, '打开时的内容');
+    await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, original);
+    await page.evaluate(() => window.rypota.updatePreferences({ autoSave: false, theme: 'light' }));
+    await execute(page, 'open');
+    await setContent(page, '我的修改');
+    await fs.writeFile(original, '磁盘修改');
+    await save();
+
+    const conflict = page.getByRole('dialog', { name: '磁盘文件已变更' });
+    await expect(conflict.getByRole('button', { name: '取消' })).toBeFocused();
+    await expect(conflict).toHaveCSS('background-color', 'rgb(251, 250, 247)');
+    await page.keyboard.press('Escape');
+    await expect(conflict).toBeHidden();
+    expect(await content(page)).toBe('我的修改');
+    expect(await fs.readFile(original, 'utf8')).toBe('磁盘修改');
+
+    await chooseSave(application, copy);
+    await save();
+    await conflict.getByRole('button', { name: '另存为…' }).click();
+    await expect.poll(() => fs.readFile(copy, 'utf8').catch(() => '')).toBe('我的修改');
+    expect(await fs.readFile(original, 'utf8')).toBe('磁盘修改');
+
+    await setContent(page, '确认覆盖后的内容');
+    await fs.writeFile(copy, '副本的磁盘修改');
+    await save();
+    await conflict.getByRole('button', { name: '覆盖磁盘文件' }).click();
+    await expect.poll(() => fs.readFile(copy, 'utf8')).toBe('确认覆盖后的内容');
+  } finally { await application.close(); }
+});
+
 test('文件侧栏只展示当前上下文，快速打开按路径区分同名文件并支持点击外部关闭', async () => {
   const { application, page, directory } = await launch();
   try {

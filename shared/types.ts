@@ -30,7 +30,8 @@ export interface WorkspaceView {
 }
 export type AppCommand = string;
 export interface FolderEntry { name: string; path: string; directory: boolean }
-export interface ActionResult { ok: boolean; message?: string; canceled?: boolean }
+export interface ActionResult { ok: boolean; message?: string; canceled?: boolean; conflict?: boolean }
+export type SaveMode = 'save' | 'save-as' | 'overwrite-conflict';
 export interface RypotaBridge {
   bootstrap(): Promise<WorkspaceView>;
   newDocument(): Promise<ActionResult>;
@@ -39,7 +40,7 @@ export interface RypotaBridge {
   activateDocument(id: string): Promise<ActionResult>;
   reorderDocuments(ids: string[]): Promise<ActionResult>;
   updateDocument(id: string, content: string, revision: number): void;
-  saveDocument(id: string, saveAs?: boolean): Promise<ActionResult>;
+  saveDocument(id: string, mode?: SaveMode): Promise<ActionResult>;
   organizeImages(id: string): Promise<ActionResult>;
   closeDocument(id: string): Promise<ActionResult>;
   restoreDraft(id: string): Promise<ActionResult>;

@@ -5,7 +5,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DocumentStore, FileConflictError, atomicWrite } from './store';
-import type { ActionResult, AppCommand } from '../shared/types';
+import type { ActionResult, AppCommand, SaveMode } from '../shared/types';
 import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
@@ -127,7 +127,11 @@ function registerIpc() {
   const handle = (channel: string, action: (windowId: string, ...args: any[]) => Promise<void> | void) => {
     ipcMain.handle(channel, async (event, ...args): Promise<ActionResult> => {
       try { await action(windowIdOf(event), ...args); return { ok: true }; }
-      catch (error) { if ((error as Error).message === 'canceled') return { ok: false, canceled: true }; return { ok: false, message: (error as Error).message }; }
+      catch (error) {
+        if (error instanceof FileConflictError) return { ok: false, conflict: true };
+        if ((error as Error).message === 'canceled') return { ok: false, canceled: true };
+        return { ok: false, message: (error as Error).message };
+      }
     });
   };
   handle('pdf:save', async (owner, previewId: string, fonts) => {
@@ -149,24 +153,17 @@ function registerIpc() {
     for (const file of result.filePaths) await openFile(windowId, file);
   });
   handle('document:recent', async (windowId, file: string) => { if (!store.recent.includes(file)) throw new Error('找不到这个最近使用的文件'); await openFile(windowId, file); });
-  handle('document:save', async (windowId, id: string, saveAs = false) => {
+  handle('document:save', async (windowId, id: string, mode: SaveMode = 'save') => {
     requireOwned(windowId, id); const document = store.documents.get(id)!;
-    const chooseDestination = async () => {
+    if (mode === 'overwrite-conflict') {
+      if (!document.path || document.status !== 'conflict') throw new Error('保存状态已变化，请重新保存。');
+      await store.save(id, undefined, true);
+    } else if (mode === 'save-as' || !document.path) {
       const result = await dialog.showSaveDialog(windows.get(windowId)!, { title: '保存 Markdown 文档', defaultPath: document.path ?? `${document.title}.md`, filters: [{ name: 'Markdown 文档', extensions: ['md'] }], properties: ['showOverwriteConfirmation', 'createDirectory'] });
       if (result.canceled || !result.filePath) throw new Error('canceled');
+      requireOwned(windowId, id);
       await store.save(id, result.filePath, true);
-    };
-    if (saveAs || !document.path) await chooseDestination();
-    else {
-      try { await store.save(id); }
-      catch (error) {
-        if (!(error instanceof FileConflictError)) throw error;
-        const decision = await dialog.showMessageBox(windows.get(windowId)!, { type: 'warning', title: '磁盘文件发生了变化', message: '保留哪一份内容？', detail: '当前编辑内容已经保留为本地草稿。可以另存为新文件，或用当前内容覆盖磁盘文件。', buttons: ['另存为…', '覆盖磁盘文件', '取消'], defaultId: 0, cancelId: 2 });
-        if (decision.response === 0) await chooseDestination();
-        else if (decision.response === 1) await store.save(id, undefined, true);
-        else throw new Error('canceled');
-      }
-    }
+    } else await store.save(id);
     await store.persist();
   });
   handle('document:close', (windowId, id: string) => store.closeDocument(windowId, id));

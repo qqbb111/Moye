@@ -45,7 +45,7 @@ details[open] > summary .tree-chevron { transform: rotate(90deg); }
 :root[data-theme='copilot'] {
   --bg: #191d20; --fg: #d6dce1; --muted: #9aa5af; --surface: #15191c;
   --border: #30383f; --hover: #29333b; --link: #a4c9df; --code: #2a333c;
-  --accent-soft: #283c4c; --chrome: #161b1e; --selection: #81aac04d; --highlight-tint: #bea07c;
+  --accent-soft: #283c4c; --chrome: #161b1e; --selection: #a2b5ad4d; --highlight-tint: #bea07c;
 }
 .titlebar { height: 35px; background: var(--chrome); }
 .app-mark { gap: 8px; margin: 0 16px; color: var(--muted); }
@@ -112,7 +112,6 @@ details > summary:hover { background: var(--hover); }
   border-radius: .16em;
   box-decoration-break: clone;
 }
-.markdown-editor .cm-selectionBackground { background: var(--selection) !important; }
 .cm-editor[data-source='true'] > .cm-scroller > .cm-content { font-size: .9em; }
 .workspace>main>footer { height: 32px; gap: 7px; padding: 0 14px; border-top: 1px solid var(--border); color: var(--muted); background: var(--bg); }
 .workspace>main>footer button { border-radius: 4px; }
@@ -121,10 +120,8 @@ details > summary:hover { background: var(--hover); }
 #save-status[data-state='pending']::before { background: #bf9b55; }
 #save-status[data-state='error']::before { background: #dd7777; }
 #word-count { padding: 2px 6px; font-variant-numeric: tabular-nums; font-size: 10px; }
-#menu { padding: 6px; border-radius: 8px; box-shadow: 0 10px 32px #00000020; }
-#menu button { padding-top: 7px; padding-bottom: 7px; border-radius: 4px; }
 dialog { width: min(500px, calc(100vw - 40px)); max-height: calc(100vh - 70px); overflow: auto; padding: 26px; border-radius: 12px; }
-dialog::backdrop { background: #13191d77; backdrop-filter: blur(3px); }
+dialog::backdrop { background: color-mix(in srgb, var(--chrome) 15%, #11171477); backdrop-filter: blur(3px); }
 dialog h2 { font-size: 19px; font-weight: 600; }
 dialog input[type=number], dialog select { border-radius: 6px; }
 .dialog-buttons { position: sticky; bottom: -26px; margin: 20px -26px -26px; padding: 15px 26px; background: var(--bg); border-top: 1px solid var(--border); }
@@ -161,11 +158,24 @@ dialog input[type=number], dialog select { border-radius: 6px; }
 .tab, .sidebar-tabs button { transition: background-color 140ms ease, color 140ms ease; }
 
 /* Moye: a quiet application frame around the user's chosen prose theme. */
-:root { --ui-accent: #487c68; --ui-accent-soft: #dce9e0; }
+:root { --ui-accent: #487c68; --ui-accent-soft: #dce9e0; accent-color: var(--ui-accent); }
 :root[data-theme='dark'], :root[data-theme='copilot'], :root[data-theme='workbuddy'] { --ui-accent: #afd1bf; --ui-accent-soft: #2d3933; }
-button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid color-mix(in srgb, var(--ui-accent) 65%, transparent); outline-offset: 2px; }
+::selection { background-color: var(--selection); }
+:root :is(button, input, select, textarea, summary, a[href], [tabindex]):where(:not(dialog)):focus-visible,
+#print-pages:focus-visible {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+:is(.tab, summary, #print-pages):focus-visible { outline-offset: -2px; }
 dialog:focus-visible { outline: none; }
-dialog input[type=checkbox] { accent-color: var(--ui-accent); }
+.md-checkbox, dialog input[type=checkbox] { accent-color: var(--ui-accent); }
+
+/* CodeMirror draws document ranges itself, but uses the system Highlight for focused widgets. */
+.markdown-editor .cm-content { --widget-selection: var(--selection); }
+.markdown-editor .cm-content :focus:not(.cm-content)::selection,
+.markdown-editor .cm-content :focus:not(.cm-content) *::selection {
+  background-color: var(--widget-selection) !important;
+}
 
 @supports (appearance: base-select) and selector(::picker(select)) {
   dialog select, dialog select::picker(select) { appearance: base-select; }
@@ -260,8 +270,19 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 #save-status:not(:empty)::before { background: var(--ui-accent); }
 #save-status[data-state='pending']::before { background: #bf9b55; }
 #save-status[data-state='error']::before { background: #dd7777; }
-#menu { border-radius: 9px; padding: 6px; font-family: var(--ui-font); box-shadow: 0 12px 36px #0004; }
-#menu button { font-size: 12px; }
+#menu { width: min(216px, calc(100vw - 12px)); max-height: calc(100vh - 12px); border-radius: 9px; padding: 5px; font-family: var(--ui-font); box-shadow: 0 8px 24px #0004; }
+#menu button { padding: 6px 10px; border-radius: 5px; font-size: 12px; }
+#menu button:not(:disabled):is(:hover, :focus-visible) { background: var(--ui-accent-soft); }
+#menu button:focus-visible { outline-offset: -1px; }
+#menu button:disabled:hover { background: transparent; cursor: default; }
+#save-conflict h2 { margin-bottom: 10px; }
+#save-conflict p { margin: 0; color: var(--fg); font-size: 13px; }
+#save-conflict .dialog-buttons { margin-top: 20px; }
+#save-conflict button { padding-inline: 12px; }
+#save-conflict button:hover { background: var(--hover); }
+#save-conflict button[value='save-as'] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+#save-conflict button[value='overwrite-conflict'] { color: #a94b42; }
+:root:not([data-theme='light']) #save-conflict button[value='overwrite-conflict'] { color: #eca29a; }
 .quick-result > .replica-icon { color: var(--ui-accent); }
 #quick-results .quick-result.selected { background: var(--ui-accent-soft); }
 #quick-input:focus, .sidebar-filter:focus-within { border-color: var(--ui-accent); }
@@ -294,7 +315,8 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .quick-search { display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 1px solid var(--ui-accent); border-radius: var(--ui-radius); background: var(--surface); }
 .quick-search > .replica-icon { color: var(--muted); }
 #quick-input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; outline: none; font-size: 14px; }
-#quick-input:focus-visible { outline: none; }
+#quick-input:focus-visible, #sidebar-filter:focus-visible { outline: none; }
+:is(.quick-search, .sidebar-filter):has(input:focus-visible) { outline: 1px solid var(--ui-accent); }
 #quick-results { margin: 8px 0 0; padding: 0; }
 #quick-results:empty { display: none; }
 #quick-results .quick-result { padding: 10px 12px; min-height: 53px; transition: background-color var(--ui-motion-fast) ease; }
@@ -310,7 +332,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
   --table-cell-bg: var(--bg);
   --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--bg));
   --table-border: var(--border);
-  --table-selection: color-mix(in srgb, var(--ui-accent) 28%, var(--bg));
+  --widget-selection: color-mix(in srgb, var(--ui-accent) 28%, var(--bg));
   --table-cell-padding: 8px;
   inline-size: 100%;
   margin: 0;
@@ -350,12 +372,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent) 65%, transparent);
   caret-color: var(--fg);
 }
-/* CodeMirror applies the system Highlight with !important to focused widgets. */
-:root[data-theme] .markdown-editor .md-table :is(th, td)::selection,
-:root[data-theme] .markdown-editor .md-table :is(th, td) *::selection {
-  color: var(--fg);
-  background-color: var(--table-selection) !important;
-}
+.md-table :is(th, td):focus-visible { outline-offset: -2px; }
 .md-table a { color: var(--ui-accent); }
 .table-toolbar {
   display: flex;
