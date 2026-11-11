@@ -19,7 +19,12 @@ const current = (page: Page) => page.locator('.editor-slot:not([hidden])');
 async function setContent(page: Page, content: string) { await page.evaluate(content => (window as any).__editor.setContent(content), content); }
 async function content(page: Page) { return page.evaluate(() => (window as any).__editor.content()); }
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
-async function settingsAction(page: Page, section: string, action: string) { await execute(page, 'preferences'); await page.getByRole('tab', { name: section, exact: true }).click(); await page.locator(`[data-settings-command="${action}"]`).click(); }
+async function toolbarAction(page: Page, section: string, action: string) {
+  const top = ['文件', '导出', '编辑'].includes(section) ? section : '编辑';
+  await page.getByRole('button', { name: top, exact: true }).click();
+  if (top !== section) await page.getByRole('menu', { name: top }).getByRole('menuitem', { name: `${section} ›`, exact: true }).click();
+  await page.getByRole('menu', { name: section, exact: true }).getByRole('menuitem', { name: new RegExp(`^${action}( |$)`) }).click();
+}
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
 test('启动、新建和打开后可立即输入，标签方向键可连续导航并保留各自正文', async () => {
@@ -44,7 +49,7 @@ test('快捷键名称仅录制绑定，说明按需显示且设置控件可通�
   try {
     const raw = '保留选区和正文'; await setContent(page, raw);
     await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 4 } }); e.focus(); });
-    await execute(page, 'shortcuts'); await page.getByRole('button', { name: '更改关闭文档绑定', exact: true }).click();
+    await execute(page, 'shortcuts'); await page.getByRole('button', { name: '修改关闭文档快捷键', exact: true }).click();
     await expect(page.locator('#preferences')).toBeVisible(); expect(await content(page)).toBe(raw);
     await expect(page.locator('[data-shortcut-id="close-tab"]')).toHaveClass(/recording/); await page.keyboard.press('Escape');
     await expect(page.locator('#preferences')).toBeVisible(); await expect(page.locator('[data-shortcut-id="close-tab"]')).toBeFocused();
@@ -54,8 +59,8 @@ test('快捷键名称仅录制绑定，说明按需显示且设置控件可通�
     await page.getByRole('button', { name: '了解中文排版整理' }).focus(); await page.keyboard.press('Enter'); await expect(page.getByRole('tooltip')).toBeVisible();
     await page.keyboard.press('Escape'); await expect(page.getByRole('tooltip')).toBeHidden(); await expect(page.locator('#preferences')).toBeVisible();
     const toggle = page.getByRole('switch', { name: '保存前整理中文排版', exact: true }); await toggle.focus(); await page.keyboard.press('Space'); await expect(toggle).toBeChecked();
-    await page.locator('#preferences-apply').click(); await expect(page.locator('#preferences')).toBeHidden();
     await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.formatOnSave)).toBe(true);
+    await expect(page.locator('#preferences')).toBeVisible();
     expect(await content(page)).toBe(raw);
   } finally { await application.close(); }
 });
@@ -65,10 +70,7 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
   try {
     await execute(page, 'preferences');
     const theme = page.locator('#theme-select');
-    await theme.selectOption('light');
-    await page.locator('#preferences-apply').click();
-    await expect(page.locator('#preferences')).toBeHidden();
-    await execute(page, 'preferences');
+    await expect(theme).toHaveValue('light');
 
     const opened = page.locator('#theme-select:open');
     await theme.click();
@@ -86,8 +88,8 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     await expect(theme).toHaveValue('dark');
-    await page.locator('#preferences-apply').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('#preferences')).toBeVisible();
   } finally { await application.close(); }
 });
 
@@ -106,7 +108,7 @@ test('编辑器右键菜单跟随主题，键盘复制保留表格选区', async
 
     await page.keyboard.press('Shift+F10');
     await expect(menu.getByRole('menuitem', { name: '在当前行后插入一行' })).toBeFocused();
-    await expect(menu.locator(':focus-visible')).toHaveCSS('outline-color', 'rgb(175, 209, 191)');
+    await expect(menu.locator(':focus-visible')).toHaveCSS('outline-color', 'rgb(72, 124, 104)');
     await page.keyboard.press('End');
     for (let step = 0; step < 5; step++) await page.keyboard.press('ArrowUp');
     await expect(menu.getByRole('menuitem', { name: '复制', exact: true })).toBeFocused();
@@ -194,24 +196,29 @@ test('设置集中分类，操作保留正文与表格选区，快捷键录制�
     const page = app.page;
     await setContent(page, '需要加粗的文字');
     await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 4 } }); e.focus(); });
-    await page.locator('#settings-open').click(); await expect(page.getByRole('tablist', { name: '设置分类' }).getByRole('tab')).toHaveCount(8);
-    await page.getByRole('tab', { name: '格式', exact: true }).click(); await page.locator('[data-settings-command="bold"]').click();
+    await toolbarAction(page, '格式', '加粗');
     expect(await content(page)).toBe('**需要加粗**的文字');
     await execute(page, 'preferences'); await page.getByRole('tab', { name: '快捷键', exact: true }).click();
+    await expect(page.getByRole('tablist', { name: '设置分类' }).getByRole('tab')).toHaveText(['常规', '快捷键', '关于']);
+    await page.getByRole('navigation', { name: '快捷键分类' }).getByRole('button', { name: '文件', exact: true }).click();
+    await page.getByText('导出 PDF', { exact: true }).click(); await expect(page.locator('[data-shortcut-id="export-pdf"]')).toHaveClass(/recording/);
+    await expect(page.locator('#print-preview')).toHaveCount(0); await page.keyboard.press('Escape');
+    await page.getByRole('navigation', { name: '快捷键分类' }).getByRole('button', { name: '格式', exact: true }).click();
     await page.getByRole('button', { name: '修改加粗快捷键', exact: true }).click(); await page.keyboard.press('Control+i'); await expect(page.locator('#shortcut-message')).toContainText('冲突');
     await page.keyboard.press('Control+Alt+b'); await expect(page.locator('[data-shortcut-id="bold"]')).toHaveText('Ctrl+Alt+B');
-    await page.locator('#preferences-apply').click();
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.shortcuts?.bold)).toBe('Ctrl+Alt+B');
+    await page.locator('#settings-close').click();
     await setContent(page, '选择'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 2 } }); e.focus(); });
     await page.keyboard.press('Control+b'); expect(await content(page)).toBe('选择');
     await page.keyboard.press('Control+Alt+b'); expect(await content(page)).toBe('**选择**');
     const profile = app.profile; await app.application.close(); app = await launch(profile);
     await execute(app.page, 'preferences'); await app.page.getByRole('tab', { name: '快捷键', exact: true }).click();
     await app.page.locator('#shortcut-search').fill('加粗'); await expect(app.page.locator('[data-shortcut-id="bold"]')).toHaveText('Ctrl+Alt+B');
-    await app.page.getByRole('button', { name: '恢复加粗默认快捷键', exact: true }).click(); await app.page.locator('#preferences-apply').click();
+    await app.page.getByRole('button', { name: '恢复加粗默认快捷键', exact: true }).click(); await app.page.locator('#settings-close').click();
     await setContent(app.page, '| 列一 | 列二 |\n| --- | --- |\n| 内容 | 数据 |');
     const cell = current(app.page).locator('td').first(); await cell.click();
     await cell.evaluate(cell => { const range = document.createRange(); range.selectNodeContents(cell); const s = window.getSelection()!; s.removeAllRanges(); s.addRange(range); });
-    await app.page.locator('#settings-open').click(); await app.page.getByRole('tab', { name: '格式', exact: true }).click(); await app.page.locator('[data-settings-command="bold"]').click();
+    await toolbarAction(app.page, '格式', '加粗');
     expect(await content(app.page)).toContain('| **内容** | 数据 |');
   } finally { await app.application.close(); }
 });
@@ -317,7 +324,7 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
     const token = await page.locator('#print-preview').getAttribute('data-preview-id');
     const bytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__replicaTest; return [...api.pdfPreviews.get([...api.windows.keys()][0], token).bytes]; }, token);
     const destination = path.join(directory, 'print-preview.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible();
-    expect(Buffer.from(await fs.readFile(destination)).equals(Buffer.from(bytes))).toBe(true); expect(await content(page)).toBe(raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'workbuddy');
+    expect(Buffer.from(await fs.readFile(destination)).equals(Buffer.from(bytes))).toBe(true); expect(await content(page)).toBe(raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await execute(page, 'export-pdf'); await expect(page.locator('#print-layout')).toHaveValue('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9.5'); await expect(page.locator('#print-lines')).not.toBeChecked();
     await page.locator('#print-layout').selectOption('portrait'); await expect(page.locator('#print-font')).toHaveValue('10.5');
     await page.evaluate(() => (window as any).__editor.setContent('# 原文已更新')); await expect(page.locator('#print-stale')).toBeVisible();
@@ -398,7 +405,7 @@ test('精简界面保留文件入口，移除模式且窄窗口可用', async ()
     await expect(page.locator('.document-heading,.quick-actions,#sidebar-close,#open-folder,#reading-time,#reading-width')).toHaveCount(0);
     await expect(page.locator('[data-menu-index]')).toHaveCount(0); await expect(page.locator('#settings-open')).toHaveCount(1);
     await expect(page.locator('#tabbar')).toBeVisible();
-    await settingsAction(page, '文件', 'quick-open');
+    await toolbarAction(page, '文件', '快速打开');
     await expect(page.locator('#quick-open')).toBeVisible(); await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '新建标签页', exact: true }).click(); await expect(page.locator('.tab')).toHaveCount(2);
     await setContent(page, '# 精简界面\n\n正文');
@@ -406,7 +413,7 @@ test('精简界面保留文件入口，移除模式且窄窗口可用', async ()
     await execute(page, 'preferences'); await expect(page.locator('#preferences')).toBeVisible();
     await expect(page.locator('#focus-toggle,#typewriter-toggle')).toHaveCount(0);
     await expect(page.locator('#preferences')).not.toContainText('专注模式'); await expect(page.locator('#preferences')).not.toContainText('打字机模式');
-    await page.locator('#reading-width-select').selectOption('1080'); await page.locator('#preferences-apply').click();
+    await page.locator('#reading-width-select').selectOption('1080');
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('1080px');
     expect(await content(page)).toBe('# 精简界面\n\n正文');
   } finally { await application.close(); }
@@ -515,7 +522,7 @@ test('WorkBuddy 排版、嵌入字体、行号槽与 Shiki github-dark 代表色
   try {
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1100, height: 900 }); window.showInactive(); });
     const raw = '# 图论\n\n## 搜索与拓扑\n\n### BFS\n\n正文采用参考字体。\n\n```cpp\n// 注释\nint value = 5;\nvoid bfs(int sx) { return; }\n```\n\n| 题面信号 | 去哪 |\n| --- | --- |\n| 最长链 | 直径 |\n\n结尾';
-    await setContent(page, raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'workbuddy');
+    await setContent(page, raw); await execute(page, 'workbuddy'); await expect(page.locator('html')).toHaveAttribute('data-theme', 'workbuddy');
     await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(31, 31, 31)');
     const slot = current(page); await expect(slot.locator('.md-h1')).toHaveCSS('font-size', '26px'); await expect(slot.locator('.md-h2')).toHaveCSS('font-size', '22px'); await expect(slot.locator('.md-h3')).toHaveCSS('font-size', '18px');
     const block = slot.locator('.md-code'); await expect(block).toHaveCSS('background-color', 'rgb(30, 30, 30)'); await expect(block).toHaveCSS('border-radius', '10px');
@@ -534,9 +541,39 @@ test('WorkBuddy 排版、嵌入字体、行号槽与 Shiki github-dark 代表色
   } finally { await application.close(); }
 });
 
+test('标题栏导出 HTML 后表格占满正文，窄屏长单元格仍会折行', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const target = path.join(directory, 'table.html');
+    await setContent(page, '# 导出排版\n\n| 名称 | 地址 |\n| --- | --- |\n| 链接 | https://example.org/' + 'long'.repeat(90) + ' |');
+    for (const [label, theme] of [['夜间', 'dark'], ['白色', 'light'], ['WorkBuddy 深色', 'workbuddy'], ['Copilot 深色', 'copilot']]) {
+      await page.getByRole('button', { name: '主题', exact: true }).click();
+      await page.getByRole('menu', { name: '主题' }).getByRole('menuitemradio', { name: label, exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await chooseSave(application, target);
+      const expectedBg = await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--bg').trim());
+      await toolbarAction(page, '导出', '导出 HTML');
+      await expect.poll(() => fs.readFile(target, 'utf8').catch(() => '')).toContain(`--bg:${expectedBg}`);
+      const opened = application.waitForEvent('window');
+      await application.evaluate(({ BrowserWindow }, file) => { const preview = new BrowserWindow({ width: 400, height: 600, show: false }); void preview.loadFile(file); }, target);
+      const html = await opened;
+      await html.locator('table').waitFor();
+      const layout = await html.locator('table').evaluate(table => {
+        const { paddingLeft, paddingRight } = getComputedStyle(document.body);
+        const available = document.body.clientWidth - parseFloat(paddingLeft) - parseFloat(paddingRight);
+        return { difference: Math.abs(available - table.getBoundingClientRect().width), pageFits: document.documentElement.scrollWidth <= innerWidth };
+      });
+      expect(layout.difference).toBeLessThan(2);
+      expect(layout.pageFits).toBe(true);
+      await html.evaluate(() => window.close());
+    }
+  } finally { await application.close(); }
+});
+
 test('Shiki 异步着色不打断代码组合输入、选区与撤销，换语言和主题后不残留旧颜色', async () => {
   const { application, page } = await launch();
   try {
+    await execute(page, 'workbuddy');
     const code = 'int value = 42;\n// '; await setContent(page, '```cpp\n' + code + '\n```\n\n结尾'); const block = current(page).locator('.md-code'); const editor = block.locator('.cm-content');
     await expect(block.locator('.cm-editor')).toHaveAttribute('data-shiki', 'ready', { timeout: 15000 }); await editor.focus(); await page.keyboard.press('Control+End');
     const cdp = await page.context().newCDPSession(page); await cdp.send('Input.imeSetComposition', { text: 'zhongwen', selectionStart: 8, selectionEnd: 8 }); await cdp.send('Input.insertText', { text: '中文' });
@@ -589,8 +626,8 @@ test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保�
     await separator.hover(); await expect(separator).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)'); expect(await separator.evaluate(element => getComputedStyle(element, '::after').width)).toBe('1px');
     await app.page.mouse.move(box.x + box.width / 2, box.y + 90); await app.page.mouse.down(); await app.page.mouse.move(box.x + box.width / 2 + 54, box.y + 90, { steps: 8 }); await app.page.mouse.up();
     await expect(separator).toHaveAttribute('aria-valuenow', '310'); await separator.focus(); await app.page.keyboard.press('ArrowRight'); await expect(separator).toHaveAttribute('aria-valuenow', '320');
-    await execute(app.page, 'preferences'); await app.page.locator('#reading-width-select').selectOption('720'); await app.page.locator('#preferences-apply').click();
-    await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); await execute(app.page, 'preferences'); await expect(app.page.locator('#reading-width-select')).toHaveValue('720'); await app.page.locator('#preferences button[value="cancel"]').click();
+    await execute(app.page, 'preferences'); await app.page.locator('#reading-width-select').selectOption('720');
+    await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); await expect(app.page.locator('#reading-width-select')).toHaveValue('720'); await app.page.locator('#settings-close').click();
     expect(await content(app.page)).toBe(raw); const profile = app.profile; await app.application.close(); app = await launch(profile);
     await expect(app.page.getByRole('separator', { name: '调整侧栏宽度' })).toHaveAttribute('aria-valuenow', '320'); await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); expect(await content(app.page)).toBe(raw);
   } finally { await app.application.close(); }
@@ -686,7 +723,7 @@ test('引用菜单和快捷键创建后光标留在标记之后，可直接输�
   try {
     for (const mode of ['shortcut', 'menu', 'blurred']) {
       await setContent(page, ''); await current(page).locator('.cm-content').click();
-      if (mode === 'menu') { await settingsAction(page, '段落', 'quote'); }
+      if (mode === 'menu') { await toolbarAction(page, '段落', '引用'); }
       else { if (mode === 'blurred') await page.locator('#settings-open').focus(); await page.keyboard.press('Control+Shift+Q'); }
       expect(await content(page)).toBe('> '); expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(2);
       await page.keyboard.insertText('引用正文'); expect(await content(page)).toBe('> 引用正文'); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('> '); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('');
@@ -936,10 +973,10 @@ test('Copilot 主题统一从偏好设置选择，重启后仍保留', async () 
   let currentApp = await launch();
   try {
     const raw = '## 标题\n\n> **引用块**\n\n```\n应用层 HTTP\n传输层 TCP\n```\n'; await setContent(currentApp.page, raw);
-    await execute(currentApp.page, 'preferences'); await currentApp.page.locator('#theme-select').selectOption('copilot'); await currentApp.page.locator('#preferences-apply').click();
+    await execute(currentApp.page, 'preferences'); await currentApp.page.locator('#theme-select').selectOption('copilot'); await currentApp.page.locator('#settings-close').click();
     await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'copilot');
     await expect(current(currentApp.page).locator('.md-quote')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await execute(currentApp.page, 'preferences'); await expect(currentApp.page.locator('#theme-select')).toHaveValue('copilot'); await currentApp.page.getByRole('button', { name: '应用', exact: true }).click();
+    await execute(currentApp.page, 'preferences'); await expect(currentApp.page.locator('#theme-select')).toHaveValue('copilot'); await currentApp.page.locator('#settings-close').click();
     expect(await content(currentApp.page)).toBe(raw);
     await currentApp.application.close(); currentApp = await launch(currentApp.profile); await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'copilot'); expect(await content(currentApp.page)).toBe(raw);
     await execute(currentApp.page, 'light'); await expect(currentApp.page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -1126,7 +1163,7 @@ test('插入表格后输入留在单元格，Tab 续行与菜单插入均可直�
     for (const text of ['列一', '列二', '数据一', '数据二', '新行一']) { await page.keyboard.insertText(text); if (text !== '新行一') await page.keyboard.press('Tab'); }
     await page.keyboard.press('Enter'); await expect(table.locator('tr')).toHaveCount(3);
     const raw = await content(page); expect(raw).toContain('| 列一 | 列二 |'); expect(raw).toContain('| 数据一 | 数据二 |'); expect(raw).toContain('| 新行一 |  |'); expect(raw).toMatch(/^前文正文\n\n\|/);
-    await settingsAction(page, '段落', 'table'); await expect(current(page).locator('table')).toHaveCount(2);
+    await toolbarAction(page, '段落', '表格'); await expect(current(page).locator('table')).toHaveCount(2);
     await page.keyboard.insertText('新表头'); await expect.poll(() => content(page)).toContain('| 新表头 | 标题 |'); expect(errors).toEqual([]);
   } finally { await application.close(); }
 });
@@ -1182,7 +1219,8 @@ test('中文整理快捷键可局部操作和单步撤销，保存整理为可�
     const partial = '前文API\n\n中间API\n\n后文API'; await setContent(page, partial);
     await page.evaluate(() => { const e = (window as any).__editor.active(); const from = e.content.indexOf('中间'); e.view.dispatch({ selection: { anchor: from, head: from + 5 } }); e.focus(); });
     await page.keyboard.press('Alt+Shift+f'); expect(await content(page)).toBe('前文API\n\n中间 API\n\n后文API');
-    await execute(page, 'preferences'); await expect(page.locator('#format-save-toggle')).not.toBeChecked(); await page.locator('#format-save-toggle').check(); await page.locator('#autosave-toggle').uncheck(); await page.getByRole('button', { name: '应用', exact: true }).click();
+    await execute(page, 'preferences'); await expect(page.locator('#format-save-toggle')).not.toBeChecked(); await page.locator('#format-save-toggle').check(); await page.locator('#autosave-toggle').uncheck(); await page.locator('#settings-close').click();
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.autoSave)).toBe(false);
     const file = path.join(directory, '中文整理.md'); await chooseSave(application, file); await execute(page, 'save'); await expect.poll(() => fs.readFile(file, 'utf8').catch(() => '')).toBe('前文 API\n\n中间 API\n\n后文 API'); await expect.poll(() => content(page)).toBe('前文 API\n\n中间 API\n\n后文 API');
     await page.evaluate(() => (window as any).__editor.active().focus()); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('前文API\n\n中间 API\n\n后文API');
     await page.evaluate(() => (window as any).rypota.updatePreferences({ autoSave: true })); await setContent(page, '自动保存API与20GB。'); await expect.poll(() => fs.readFile(file, 'utf8')).toBe('自动保存 API 与 20 GB。'); await expect.poll(() => content(page)).toBe('自动保存 API 与 20 GB。');

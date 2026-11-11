@@ -13,7 +13,7 @@ test('打印偏好在重启后保留两套字号，文档和编辑主题保持�
     const id = store.newDocument(windowId, '打印偏好不会改变代码');
     store.setPreferences({ print: { layout: 'landscape-two-column', color: 'light', lineNumbers: false, fonts: { portrait: 10.5, 'landscape-two-column': 9.5 } } }); await store.flush();
     const restored = new DocumentStore(store.directory); await restored.initialize();
-    try { assert.deepEqual(restored.preferences.print, store.preferences.print); assert.equal(restored.preferences.theme, 'workbuddy'); assert.equal(restored.documents.get(id)?.content, '打印偏好不会改变代码'); } finally { restored.dispose(); }
+    try { assert.deepEqual(restored.preferences.print, store.preferences.print); assert.equal(restored.preferences.theme, 'light'); assert.equal(restored.documents.get(id)?.content, '打印偏好不会改变代码'); } finally { restored.dispose(); }
   } finally { store.dispose(); }
 });
 

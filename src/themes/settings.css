@@ -24,17 +24,19 @@
 #preferences input[role=switch]:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
 #preferences input[role=switch]:checked::after { transform: translateX(14px); background: var(--bg); }
 #format-save-help { position: fixed; inset: auto; width: 278px; max-width: calc(100vw - 32px); margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font: 12px/1.7 var(--ui-font); box-shadow: 0 6px 20px #0003; }
-#settings-shortcut-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-#shortcut-search { width: 60%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+#settings-shortcuts { display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: start; gap: 22px; }
+.shortcut-categories { position: sticky; top: 0; display: grid; gap: 3px; padding: 3px 11px 3px 0; border-inline-end: 1px solid var(--border); }
+#preferences .shortcut-categories button { padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); text-align: left; font-size: 12px; }
+#preferences .shortcut-categories button:hover { background: var(--hover); color: var(--fg); }
+#preferences .shortcut-categories [aria-pressed=true] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+#shortcut-search { width: 100%; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .settings-command { display: flex; align-items: center; gap: 9px; min-height: 49px; border-bottom: 1px solid var(--border); }
-#preferences .settings-action { flex: 1; min-width: 0; text-align: left; padding: 10px 8px; font-size: 13px; border: 0; background: transparent; }
+#preferences .shortcut-label { display: block; flex: 1; min-width: 0; margin: 0; padding: 7px 2px; font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
 #preferences .shortcut-key { padding: 5px 9px; min-width: 148px; font-size: 12px; color: var(--muted); background: var(--surface); border-radius: 5px; }
 #preferences .shortcut-key.recording { color: var(--ui-accent); border-color: var(--ui-accent); }
 #preferences .shortcut-clear, #preferences .shortcut-reset { width: 26px; height: 26px; padding: 5px; border: 0; background: transparent; color: var(--muted); }
 #preferences .settings-command button:hover { background: var(--hover); }
-#preferences .settings-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: auto; min-height: 68px; padding: 14px 26px; border-top: 1px solid var(--border); background: var(--bg); }
-#preferences .settings-footer > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 76px; height: 32px; padding: 0 16px; font: 500 13px/1 var(--ui-font); border-radius: 6px; }
-#shortcut-message { flex: 1; font-size: 12px; line-height: 1.5; color: var(--ui-accent); }
+#preferences #shortcut-message { flex: 0 0 auto; margin: 0; padding: 10px 26px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.5; color: var(--ui-accent); }
 #settings-about { max-width: 460px; padding: 20px 8px; }
 #settings-about h3 { font-size: 22px; font-weight: 600; }
 .about-version { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; min-height: 44px; }
@@ -47,6 +49,8 @@
   #preferences { width: calc(100vw - 20px); height: calc(100vh - 28px); }
   .settings-tabs { padding-left: 12px; padding-right: 12px; }
   #settings-panel { padding: 10px 14px 18px; }
+  #settings-shortcuts { grid-template-columns: 75px minmax(0, 1fr); gap: 12px; }
+  .shortcut-categories { padding-inline-end: 7px; }
   .settings-command { gap: 5px; }
   #preferences .shortcut-key { min-width: 112px; font-size: 11px; }
 }
@@ -54,12 +58,10 @@
 #preferences .shortcut-clear, #preferences .shortcut-reset { opacity: 0; }
 #preferences .settings-command:hover .shortcut-clear, #preferences .settings-command:hover .shortcut-reset, #preferences .settings-command:focus-within .shortcut-clear, #preferences .settings-command:focus-within .shortcut-reset { opacity: 1; }
 
-.settings-action:focus-visible, .shortcut-key:focus-visible { outline-offset: -2px; }
+.shortcut-key:focus-visible { outline-offset: -2px; }
 #settings-panel:focus-visible { outline: 1px solid var(--ui-accent); outline-offset: -3px; }
-#preferences .settings-footer { box-sizing: border-box; }
 @media (max-width: 700px) {
   .settings-header { padding: 18px 16px 12px; }
-  #preferences .settings-footer { padding-left: 14px; padding-right: 14px; }
   .setting-row { gap: 12px; }
   #preferences .setting-row label { font-size: 12px; }
 }

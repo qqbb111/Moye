@@ -9,7 +9,7 @@ import './themes/controls.css';
 import './themes/workbuddy.css';
 import { icon, type IconName } from './icons';
 import logo from '../assets/moye.svg?url';
-import { APP_NAME, APP_SHORT_NAME } from '../shared/branding';
+import { APP_NAME, APP_SHORT_NAME, THEMES } from '../shared/branding';
 import { markdownStatistics, toggleMarkup, applyEdits } from '../shared/markdown-tools';
 import { MODERN_DARK } from '../shared/code-theme';
 import { EditorView } from '@codemirror/view';
@@ -24,7 +24,7 @@ import type { WorkspaceView, DocumentView, ActionResult, FolderEntry, SaveMode }
 const bridge = window.rypota;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const app = $('#app');
-app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作"><span class="menu-spacer"></span><button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
+app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作">${['文件', '编辑', '主题', '导出'].map(label => `<button type="button" data-toolbar-menu="${label}" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">${label}</button>`).join('')}<button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
   <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-heading"><strong id="folder-name">文档</strong></div><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><label class="sidebar-filter">${icon('search')}<input id="sidebar-filter" type="search" aria-label="筛选侧栏" placeholder="筛选当前列表…" autocomplete="off"></label><div id="sidebar-content"></div></aside><div id="sidebar-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="256" tabindex="0" hidden></div>
   <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="word-count" title="字数统计">0 字</button></footer></main></div>
   <div id="menu" role="menu" aria-label="编辑操作" hidden></div><div id="toast" role="status" hidden></div>
@@ -100,8 +100,10 @@ async function pasteImage(id: string, file: File) {
 }
 function applyState(next: WorkspaceView) {
   const previousId = workspace?.activeId;
+  const previousPreferences = workspace?.preferences;
   if (workspace) next.documents = next.documents.map(incoming => { const local = workspace.documents.find(doc => doc.id === incoming.id); return local && local.revision > incoming.revision ? { ...incoming, content: local.content, revision: local.revision, dirty: true, status: incoming.error ? incoming.status : 'draft' } : incoming; });
   workspace = next;
+  settings.syncPreferences(previousPreferences);
   for (const [id, slot] of slots) if (!workspace.documents.some(doc => doc.id === id)) { slot.editor.destroy(); slot.element.remove(); slots.delete(id); }
   const doc = activeDocument(); if (doc) ensureEditor(doc);
   for (const [id, slot] of slots) { slot.element.hidden = id !== workspace.activeId; const current = workspace.documents.find(doc => doc.id === id); if (current && current.content !== slot.editor.content) { slot.applying = true; slot.editor.replace(current.content); slot.applying = false; } }
@@ -355,6 +357,7 @@ function hideMenu(restoreFocus = false) {
   const origin = menuOrigin;
   menuOrigin = undefined;
   $('#menu').hidden = true;
+  toolbarMenu?.setAttribute('aria-expanded', 'false'); toolbarMenu = undefined;
   if (!restoreFocus || !origin?.element.isConnected || document.activeElement === origin.element) return;
   origin.element.focus({ preventScroll: true });
   const text = origin.element.firstChild;
@@ -363,13 +366,33 @@ function hideMenu(restoreFocus = false) {
     window.getSelection()?.setBaseAndExtent(text, Math.min(anchor, text.length), text, Math.min(head, text.length));
   }
 }
-function openContextMenu(target: Element, x: number, y: number, keyboard = false) {
+let toolbarMenu: HTMLButtonElement | undefined;
+function addMenuItem(label: string, action: () => void, options: { disabled?: boolean; selected?: boolean; shortcut?: string; keepOpen?: boolean } = {}) {
+  const button = document.createElement('button');
+  button.type = 'button'; button.role = options.selected === undefined ? 'menuitem' : 'menuitemradio'; button.tabIndex = -1;
+  button.textContent = label; button.disabled = !!options.disabled;
+  if (options.selected !== undefined) {
+    button.setAttribute('aria-checked', String(options.selected));
+    if (options.selected) button.insertAdjacentHTML('beforeend', icon('check'));
+  }
+  if (options.shortcut) { const key = document.createElement('kbd'); key.textContent = options.shortcut; button.append(key); }
+  button.onmousedown = event => event.preventDefault();
+  button.onclick = () => { if (!options.keepOpen) hideMenu(true); action(); };
+  $('#menu').append(button);
+}
+function separateMenu() { const separator = document.createElement('hr'); separator.role = 'separator'; $('#menu').append(separator); }
+function placeMenu(x: number, y: number, focus: boolean) {
   const menu = $('#menu');
-  const focused = document.activeElement as HTMLElement;
-  const cell = target.closest<HTMLElement>('th,td');
-  if (cell && focused !== cell) cell.focus({ preventScroll: true });
-  const origin = document.activeElement as HTMLElement;
+  menu.hidden = false;
+  menu.style.maxHeight = toolbarMenu ? `${Math.max(0, innerHeight - y - 6)}px` : '';
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(6, Math.min(x, innerWidth - width - 6))}px`;
+  menu.style.top = `${Math.max(6, Math.min(y, innerHeight - height - 6))}px`;
+  if (focus) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+}
+function rememberMenuOrigin(origin: HTMLElement) {
   menuOrigin = { element: origin };
+  const cell = origin.closest<HTMLElement>('th,td');
   const selection = window.getSelection();
   if (cell && selection?.anchorNode && selection.focusNode && cell.contains(selection.anchorNode) && cell.contains(selection.focusNode)) {
     const offset = (node: Node, position: number) => {
@@ -377,38 +400,65 @@ function openContextMenu(target: Element, x: number, y: number, keyboard = false
     };
     menuOrigin.selection = [offset(selection.anchorNode, selection.anchorOffset), offset(selection.focusNode, selection.focusOffset)];
   }
-  menu.replaceChildren();
-  const item = (label: string, action: () => void, disabled = false) => {
-    const button = document.createElement('button');
-    button.type = 'button'; button.role = 'menuitem'; button.tabIndex = -1;
-    button.textContent = label; button.disabled = disabled;
-    button.onmousedown = event => event.preventDefault();
-    button.onclick = () => { hideMenu(true); action(); };
-    menu.append(button);
-  };
-  const separate = () => { const separator = document.createElement('hr'); separator.role = 'separator'; menu.append(separator); };
+}
+function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = trigger.dataset.toolbarMenu!) {
+  const menu = $('#menu');
+  if (toolbarMenu !== trigger) {
+    hideMenu(true);
+    rememberMenuOrigin(document.activeElement as HTMLElement);
+    toolbarMenu = trigger;
+    trigger.setAttribute('aria-expanded', 'true');
+  }
+  menu.replaceChildren(); menu.setAttribute('aria-label', section);
+  const addCommand = (command: (typeof COMMANDS)[number]) => addMenuItem(command.label, () => void execute(command.id), {
+    disabled: !activeDocument() && (command.editor || ['save', 'save-as', 'export-pdf', 'export-html', 'detach', 'close-tab', 'organize-images'].includes(command.id)),
+    shortcut: commandKeys(command.id, workspace.preferences.shortcuts)[0],
+  });
+  if (section === '主题') {
+    for (const [theme, label] of THEMES) {
+      addMenuItem(label, () => void run(() => bridge.updatePreferences({ theme })), { selected: workspace.preferences.theme === theme });
+    }
+  } else if (section === '导出') COMMANDS.filter(command => command.id.startsWith('export-')).forEach(addCommand);
+  else {
+    if (section !== trigger.dataset.toolbarMenu) {
+      addMenuItem('返回编辑', () => openToolbarMenu(trigger, true), { keepOpen: true }); separateMenu();
+    }
+    if (section === '编辑') {
+      for (const category of ['段落', '格式', '视图']) addMenuItem(category + ' ›', () => openToolbarMenu(trigger, true, category), { keepOpen: true });
+      separateMenu();
+    }
+    COMMANDS.filter(command => command.category === section && !['auto-save', 'export-pdf', 'export-html'].includes(command.id)).forEach(addCommand);
+  }
+  const bounds = trigger.getBoundingClientRect();
+  placeMenu(bounds.left, bounds.bottom + 6, focus);
+}
+function openContextMenu(target: Element, x: number, y: number, keyboard = false) {
+  const menu = $('#menu');
+  hideMenu();
+  const focused = document.activeElement as HTMLElement;
+  const cell = target.closest<HTMLElement>('th,td');
+  if (cell && focused !== cell) cell.focus({ preventScroll: true });
+  const origin = document.activeElement as HTMLElement;
+  rememberMenuOrigin(origin);
+  menu.replaceChildren(); menu.setAttribute('aria-label', '编辑操作');
   const table = target.closest('.md-table');
   if (table) {
-    for (const button of table.querySelectorAll<HTMLButtonElement>('.table-toolbar button')) item(button.title, () => button.click(), button.disabled);
-    separate();
+    for (const button of table.querySelectorAll<HTMLButtonElement>('.table-toolbar button')) addMenuItem(button.title, () => button.click(), { disabled: button.disabled });
+    separateMenu();
   }
   const textField = origin.matches('input,textarea') && !!origin.closest('#editor-stage');
   for (const [label, action] of [['剪切', 'cut'], ['复制', 'copy'], ['粘贴', 'paste'], ['全选', 'select-all']]) {
-    item(label, () => {
+    addMenuItem(label, () => {
       if (!textField) void execute(action);
       else if (action === 'paste') void run(() => bridge.paste());
       else document.execCommand(action === 'select-all' ? 'selectAll' : action);
     });
   }
   if (!textField) {
-    separate();
-    for (const [label, action] of [['加粗', 'bold'], ['斜体', 'italic'], ['超链接', 'link']]) item(label, () => void execute(action));
+    separateMenu();
+    for (const [label, action] of [['加粗', 'bold'], ['斜体', 'italic'], ['超链接', 'link']]) addMenuItem(label, () => void execute(action));
   }
-  menu.hidden = false;
-  const { width, height } = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(6, Math.min(x, innerWidth - width - 6))}px`;
-  menu.style.top = `${Math.max(6, Math.min(y, innerHeight - height - 6))}px`;
-  if (keyboard) menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  placeMenu(x, y, keyboard);
 }
 async function saveDocument(id: string, mode: SaveMode) {
   await run(async () => {
@@ -492,12 +542,25 @@ async function execute(action: string, value?: string) {
     if (!printPreview) { const { PrintPreview } = await import('./print-preview'); printPreview = new PrintPreview(id => workspace.documents.find(doc => doc.id === id), media, () => activeEditor()?.focus()); }
     printPreview.open(doc, workspace.preferences.print); return;
   }
-  if (action.startsWith('export-') && doc) {
+  if (action === 'export-html' && doc) {
     const workbuddy = workspace.preferences.theme === 'workbuddy';
+    const theme = getComputedStyle(document.documentElement);
+    const colors = ['bg', 'fg', 'border', 'surface', 'muted', 'ui-accent'].map(token => `--${token}:${theme.getPropertyValue(`--${token}`).trim()}`).join(';');
+    const width = workspace.preferences.readingWidth ?? 900;
     const body = await exportHTML(doc.content, { id: doc.id, media: url => media(doc.id, url), link, changed: () => {}, workbuddy: () => workbuddy, githubDark: () => workspace.preferences.codeTheme === 'github-dark' });
     const extraStyle = workbuddy ? (await import('./workbuddy-export')).default : '';
-    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'"><title>${doc.title.replace(/[<>&"]/g, '')}</title><style>body{font:16px/1.6 'Segoe UI','霞鹜文楷','LXGW WenKai','Microsoft YaHei UI',sans-serif;color:#333;margin:36px auto;max-width:860px;padding:0 30px}h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em}h1{font-size:2.25em}h2{font-size:1.75em}a{color:#4183c4}pre{padding:16px;background:#f6f8fa;white-space:pre-wrap}code{font-family:Consolas,'霞鹜文楷','LXGW WenKai',monospace}table{border-collapse:collapse;margin-left:auto;margin-right:auto}td,th{border:1px solid #ddd;padding:6px 13px}blockquote{border-left:4px solid #ddd;margin-left:0;padding-left:16px;color:#777}img{max-width:100%}.katex-html{display:none}math{font-size:1.1em}p{margin:1em 0}${extraStyle}</style></head><body>${body}</body></html>`;
-    return run(() => bridge.exportDocument(doc.id, action === 'export-pdf' ? 'pdf' : 'html', html));
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'"><title>${doc.title.replace(/[<>&"]/g, '')}</title><style>
+      :root{${colors};background:var(--bg);color:var(--fg)}
+      body{font:16px/1.65 'Segoe UI','霞鹜文楷','LXGW WenKai','Microsoft YaHei UI',sans-serif;margin:0 auto;padding-block:32px 64px}
+      h1,h2{border-bottom:1px solid var(--border);padding-bottom:.3em}h1{font-size:2.25em}h2{font-size:1.75em}a{color:var(--ui-accent)}
+      pre{padding:16px;background:var(--surface);white-space:pre-wrap;overflow-wrap:anywhere}code{font-family:Consolas,'霞鹜文楷','LXGW WenKai',monospace}
+      td,th{border:1px solid var(--border);padding:8px 12px;vertical-align:top}th{background:var(--surface);text-align:start}
+      blockquote{border-left:4px solid var(--border);margin-left:0;padding-left:16px;color:var(--muted)}img,svg{max-width:100%;height:auto}.katex-html{display:none}math{font-size:1.1em}p{margin:1em 0}
+      ${extraStyle}
+      body{box-sizing:border-box;width:100%;max-width:${width}px;padding-inline:clamp(16px,5vw,42px);overflow-wrap:anywhere}
+      table{width:100%;margin:12px 0;border-collapse:collapse}td,th{overflow-wrap:anywhere}
+    </style></head><body>${body}</body></html>`;
+    return run(() => bridge.exportDocument(doc.id, 'html', html));
   }
   if (action === 'paste') { if (!document.activeElement?.closest('#editor-stage')) editor?.focus(); return run(() => bridge.paste()); }
   if (['cut', 'copy', 'paste', 'select-all'].includes(action)) {
@@ -530,7 +593,12 @@ async function execute(action: string, value?: string) {
   if (!formatCell(action)) editor?.action(action);
 }
 
-document.addEventListener('mousedown', event => { if (!(event.target as HTMLElement).closest('#menu')) hideMenu(); });
+document.addEventListener('mousedown', event => { if (!(event.target as HTMLElement).closest('#menu,[data-toolbar-menu]')) hideMenu(); });
+for (const trigger of document.querySelectorAll<HTMLButtonElement>('[data-toolbar-menu]')) {
+  trigger.onmousedown = event => event.preventDefault();
+  trigger.onclick = event => { if (toolbarMenu === trigger) hideMenu(true); else if (workspace) openToolbarMenu(trigger, event.detail === 0); };
+  trigger.onkeydown = event => { if (event.key === 'ArrowDown' && workspace) { event.preventDefault(); openToolbarMenu(trigger, true); } };
+}
 let compositionTarget: EventTarget | null = null;
 document.addEventListener('compositionstart', event => { compositionTarget = event.target; }, true);
 document.addEventListener('compositionend', () => { compositionTarget = null; }, true);
@@ -622,7 +690,7 @@ sidebarResize.onkeydown = event => {
 sidebarResize.ondblclick = () => void run(() => bridge.updatePreferences({ sidebarWidth: 256 }));
 $('#quick-open').addEventListener('close', () => requestAnimationFrame(() => { if (!document.querySelector('dialog[open]')) activeEditor()?.focus(); }));
 $('#settings-open').onmousedown = event => event.preventDefault();
-bridge.onState(applyState); bridge.onCommand(command => void execute(command)); bridge.onMessage(toast); bridge.onPrepareClose(async token => { await Promise.allSettled([...pendingImages]); flushAll(); bridge.finishClose(token); });
+bridge.onState(applyState); bridge.onCommand(command => void execute(command)); bridge.onMessage(toast); bridge.onPrepareClose(async token => { await Promise.allSettled([...pendingImages]); flushAll(); await settings.flush(); bridge.finishClose(token); });
 void bridge.bootstrap().then(applyState).catch(error => toast(`无法读取工作区：${error.message}`));
 // Desktop acceptance tests use the public editor state; this does not expose filesystem access.
 (window as any).__editor = { active: activeEditor, execute, content: () => activeEditor()?.content, setContent: (content: string) => activeEditor()?.replace(content) };

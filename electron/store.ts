@@ -55,7 +55,7 @@ export class DocumentStore {
   readonly windows = new Map<string, WindowRecord>();
   readonly images: ImageAttachments;
   recent: string[] = [];
-  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'workbuddy', fontSize: 16, sidebar: false, tabs: true, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
+  preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'light', fontSize: 16, sidebar: false, tabs: true, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
   recovered = false;
   onChanged: () => void = () => {};
   onError: (message: string) => void = () => {};

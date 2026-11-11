@@ -193,10 +193,13 @@ function registerIpc() {
   handle('window:new', () => { newBlankWindow(); });
   handle('document:detach', (windowId, id: string) => { requireOwned(windowId, id); const destination = store.newWindow(); store.moveDocument(windowId, id, destination); createWindow(destination); });
   handle('preferences:update', async (_windowId, preferences) => {
+    const previousCodeTheme = store.preferences.codeTheme;
     store.setPreferences(preferences);
-    if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
-    else codeTheme.stop();
-    publish(); await store.persist();
+    const codeThemeChanged = previousCodeTheme !== store.preferences.codeTheme;
+    if (codeThemeChanged && store.preferences.codeTheme !== 'vscode') codeTheme.stop();
+    publish();
+    if (codeThemeChanged && store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); if (store.preferences.codeTheme === 'vscode') codeTheme.start(); }
+    await store.persist();
   });
   handle('edit:paste', windowId => windows.get(windowId)!.webContents.paste());
   handle('code-theme:refresh', async () => { await codeTheme.refresh(true); publish(); });

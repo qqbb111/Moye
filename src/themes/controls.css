@@ -62,7 +62,6 @@ details[open] > summary .tree-chevron { transform: rotate(90deg); }
 .brand-name { font: 600 12px/1 var(--ui-font); letter-spacing: .3px; }
 .menubar { height: 34px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--border); gap: 1px; }
 .menubar > button { height: 27px; padding: 0 10px; border-radius: 5px; font-size: 12px; }
-.menu-spacer { flex: 1; }
 #sidebar { width: var(--sidebar-width); border-right: 0; }
 .sidebar-heading { padding: 20px 17px 14px; min-height: 57px; gap: 8px; }
 .sidebar-heading strong { font-size: 12px; font-weight: 600; letter-spacing: .2px; }
@@ -135,7 +134,6 @@ dialog h2 { font-size: 19px; font-weight: 600; }
 dialog input[type=number], dialog select { border-radius: 6px; }
 .dialog-buttons { position: sticky; bottom: -26px; margin: 20px -26px -26px; padding: 15px 26px; background: var(--bg); border-top: 1px solid var(--border); }
 .dialog-buttons button { border-radius: 6px; }
-#preferences-apply { color: var(--bg); background: var(--fg); }
 #quick-open { width: min(620px, calc(100vw - 40px)); padding: 22px 18px 14px; }
 #quick-input { padding: 12px 14px; border-radius: 7px; font-size: 14px; }
 #quick-input:focus { border-color: var(--link); }
@@ -243,6 +241,8 @@ dialog:focus-visible { outline: none; }
 .menubar button { -webkit-app-region: no-drag; }
 .menubar > button { font-size: 12px; padding: 0 9px; height: 29px; color: var(--muted); }
 .menubar > button:hover, .menubar > button.active { color: var(--fg); background: var(--hover); }
+.menubar > button[aria-expanded=true] { color: var(--ui-accent); background: var(--ui-accent-soft); }
+#menu [role='menuitemradio'] .replica-icon { margin-inline-start: auto; color: var(--ui-accent); }
 .window-controls { margin-left: 0; height: 100%; }
 .window-controls button { width: 44px; }
 .window-controls button:focus-visible { outline-offset: -4px; }
@@ -296,7 +296,6 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 #quick-results .quick-result.selected { background: var(--ui-accent-soft); }
 #quick-input:focus, .sidebar-filter:focus-within { border-color: var(--ui-accent); }
 #preferences p { font-size: 11px; line-height: 1.7; }
-#preferences-apply { background: var(--ui-accent); color: var(--chrome); border-color: transparent; }
 #about h2 { color: var(--ui-accent); }
 @media (max-width: 900px) {
   .titlebar { gap: 12px; padding-left: 12px; }
