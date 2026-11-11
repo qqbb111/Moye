@@ -263,10 +263,8 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
   --table-border: var(--border);
   --table-selection: color-mix(in srgb, var(--ui-accent) 28%, var(--bg));
   --table-cell-padding: 8px;
-  inline-size: fit-content;
-  min-inline-size: 40%;
-  max-inline-size: 100%;
-  margin: 0 auto;
+  inline-size: 100%;
+  margin: 0;
 }
 .table-content {
   overflow-x: auto;
