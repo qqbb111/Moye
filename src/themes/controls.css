@@ -166,6 +166,55 @@ dialog input[type=number], dialog select { border-radius: 6px; }
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 1px solid color-mix(in srgb, var(--ui-accent) 65%, transparent); outline-offset: 2px; }
 dialog:focus-visible { outline: none; }
 dialog input[type=checkbox] { accent-color: var(--ui-accent); }
+
+@supports (appearance: base-select) and selector(::picker(select)) {
+  dialog select, dialog select::picker(select) { appearance: base-select; }
+  dialog select {
+    align-items: center;
+    gap: 8px;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  dialog select::picker-icon {
+    content: '';
+    inline-size: 6px;
+    block-size: 6px;
+    margin-inline: auto 3px;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    color: var(--muted);
+    rotate: 45deg;
+    transition: rotate var(--ui-motion-fast) ease;
+  }
+  dialog select:open::picker-icon { rotate: 225deg; }
+  dialog select::picker(select) {
+    margin-block: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--fg);
+    box-shadow: 0 5px 16px #0003;
+  }
+  dialog select option {
+    min-block-size: 30px;
+    padding: 5px 8px;
+    gap: 8px;
+    border-radius: var(--ui-radius);
+  }
+  dialog select option:checked { background: var(--ui-accent-soft); }
+  dialog select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ui-accent); }
+  dialog select option:not(:checked):is(:hover, :focus-visible) {
+    background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+  }
+  dialog select option:focus-visible {
+    outline: 1px solid var(--ui-accent);
+    outline-offset: -1px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    dialog select::picker-icon { transition: none; }
+  }
+}
 :root[data-theme='workbuddy'] { --chrome: #191c1b; --surface: #191c1b; }
 .titlebar { height: 48px; padding-left: 18px; gap: 22px; border-bottom: 1px solid var(--border); }
 .app-mark { margin: 0; gap: 8px; flex-shrink: 0; color: var(--fg); }

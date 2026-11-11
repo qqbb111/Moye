@@ -60,6 +60,37 @@ test('快捷键名称仅录制绑定，说明按需显示且设置控件可通�
   } finally { await application.close(); }
 });
 
+test('设置下拉使用主题选中态，支持键盘选择和退出', async () => {
+  const { application, page } = await launch();
+  try {
+    await execute(page, 'preferences');
+    const theme = page.locator('#theme-select');
+    await theme.selectOption('light');
+    await page.locator('#preferences-apply').click();
+    await expect(page.locator('#preferences')).toBeHidden();
+    await execute(page, 'preferences');
+
+    const opened = page.locator('#theme-select:open');
+    await theme.click();
+    await expect(opened).toBeVisible();
+    await expect(theme.locator('option:checked')).toHaveCSS('background-color', 'rgb(220, 233, 224)');
+    await page.keyboard.press('ArrowDown');
+    await expect(theme.locator('option:focus-visible')).toHaveText('夜间');
+    await page.keyboard.press('Escape');
+    await expect(opened).toHaveCount(0);
+    await expect(page.locator('#preferences')).toBeVisible();
+    await expect(theme).toHaveValue('light');
+
+    await page.keyboard.press('Space');
+    await expect(opened).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(theme).toHaveValue('dark');
+    await page.locator('#preferences-apply').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  } finally { await application.close(); }
+});
+
 test('文件侧栏只展示当前上下文，快速打开按路径区分同名文件并支持点击外部关闭', async () => {
   const { application, page, directory } = await launch();
   try {
