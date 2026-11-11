@@ -39,6 +39,97 @@ const hangingCodeIndent = EditorView.decorations.compute(['doc'], state => {
 });
 type Context = { node: MarkdownNode; from: number; to: number; source: string; host: Host; signature?: string };
 const widgetEditors = new WeakMap<HTMLElement, EditorView>();
+function widgetAt(view: EditorView, position: number) {
+  return [...view.contentDOM.querySelectorAll<HTMLElement>('.md-block')].find(root => Number(root.dataset.from) <= position && position <= Number(root.dataset.to));
+}
+function blockBodyStart(root: HTMLElement) {
+  const context = (root as any).context as Context;
+  return context.from + context.source.indexOf('\n') + 1;
+}
+function codeToSource(view: EditorView, root: HTMLElement, code: EditorView, position: number) {
+  const line = code.state.doc.lineAt(position);
+  const first = view.state.doc.lineAt(blockBodyStart(root)).number;
+  const raw = view.state.doc.line(Math.min(view.state.doc.lines, first + line.number - 1));
+  const prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0;
+  return Math.min(raw.to, raw.from + prefix + position - line.from);
+}
+function sourceToCode(view: EditorView, root: HTMLElement, code: EditorView, position: number) {
+  const body = blockBodyStart(root);
+  const raw = view.state.doc.lineAt(Math.max(body, position));
+  const number = Math.min(code.state.doc.lines, raw.number - view.state.doc.lineAt(body).number + 1);
+  const line = code.state.doc.line(number);
+  const prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0;
+  return line.from + Math.max(0, Math.min(line.length, position - raw.from - prefix));
+}
+type ViewportAnchor = { position: number; offset: number; atTop?: boolean; wrapped?: boolean; block?: boolean };
+function firstVisibleElement(view: EditorView, y: number) {
+  // Read the currently painted lines before CodeMirror measures the new viewport.
+  const elements = Array.from(view.contentDOM.children).filter(element => element.matches('.cm-line, .md-widget'));
+  return elements.find(element => element.getBoundingClientRect().bottom > y) ?? elements.at(-1);
+}
+function textViewportAnchor(view: EditorView, element: Element, y: number): ViewportAnchor {
+  const rect = element.getBoundingClientRect();
+  const from = view.posAtDOM(element);
+  if (y >= rect.top + view.defaultLineHeight) {
+    const range = document.caretRangeFromPoint(rect.left + 1, y);
+    if (range && element.contains(range.startContainer)) {
+      const position = view.posAtDOM(range.startContainer, range.startOffset);
+      const coordinates = range.getBoundingClientRect();
+      if (position > from && coordinates.height) return { position, offset: coordinates.top - (y - 1), wrapped: true };
+    }
+  }
+  return { position: from, offset: rect.top - (y - 1) };
+}
+function tableRowPositions(root: HTMLElement) {
+  const context = (root as any).context as Context;
+  const table = root.querySelector<HTMLTableElement>('.table-content > table');
+  return Array.from(table?.rows ?? [], (row, index) => {
+    const node = context.node.children?.[index];
+    return { row, position: node ? startOf(node) : context.from };
+  });
+}
+function viewportAnchor(view: EditorView): ViewportAnchor {
+  if (view.scrollDOM.scrollTop <= 1) return { position: 0, offset: 0, atTop: true };
+  const top = view.scrollDOM.getBoundingClientRect().top;
+  const y = top + 1, element = firstVisibleElement(view, y);
+  if (!element) return { position: view.elementAtHeight(y - view.documentTop).from, offset: 0 };
+  const root = element.querySelector<HTMLElement>('.md-block');
+  if (!root) return textViewportAnchor(view, element, y);
+  const code = widgetEditors.get(root);
+  if (code && y >= code.documentTop) {
+    const line = firstVisibleElement(code, y);
+    if (line) {
+      const anchor = textViewportAnchor(code, line, y);
+      return { ...anchor, position: codeToSource(view, root, code, anchor.position) };
+    }
+  }
+  if (root.classList.contains('md-table')) {
+    const entry = tableRowPositions(root).find(({ row }) => row.getBoundingClientRect().bottom > y);
+    if (entry) return { position: entry.position, offset: entry.row.getBoundingClientRect().top - top };
+  }
+  return { position: Number(root.dataset.from), offset: root.getBoundingClientRect().top - top, block: true };
+}
+function textPositionTop(view: EditorView, position: number, wrapped?: boolean) {
+  const coordinates = view.coordsAtPos(position);
+  if (wrapped && coordinates) return coordinates.top;
+  const { node } = view.domAtPos(position);
+  const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
+  if (line?.parentElement === view.contentDOM) return line.getBoundingClientRect().top;
+  return coordinates?.top ?? view.documentTop + view.lineBlockAt(position).top;
+}
+function viewportPositionTop(view: EditorView, anchor: ViewportAnchor) {
+  const { position, wrapped, block } = anchor;
+  const root = widgetAt(view, position);
+  if (!root) return textPositionTop(view, position, wrapped);
+  if (block) return root.getBoundingClientRect().top;
+  const code = widgetEditors.get(root);
+  if (code && position >= blockBodyStart(root)) return textPositionTop(code, sourceToCode(view, root, code, position), wrapped);
+  if (root.classList.contains('md-table')) {
+    const entry = tableRowPositions(root).reverse().find(row => row.position <= position);
+    if (entry) return entry.row.getBoundingClientRect().top;
+  }
+  return root.getBoundingClientRect().top;
+}
 function focusEmbedded(view: EditorView, position: number) {
   const focus = () => {
     if (view.state.field(sourceField)) return true;
@@ -419,7 +510,7 @@ function smartEnter(view: EditorView): boolean {
 }
 export class MarkdownEditor {
   readonly view: EditorView;
-  private modeSequence = 0;
+  private modeViewport?: { doc: EditorState['doc']; origin: ViewportAnchor; destinationTop: number | null };
   constructor(parent: HTMLElement, content: string, readonly host: Host) {
     let compositionSequence = 0;
     const finishComposition = (view: EditorView, sequence: number) => { requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -469,14 +560,19 @@ export class MarkdownEditor {
   setCodeAppearance(workbuddy: boolean, githubDark: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeAppearance?.(workbuddy, githubDark); }
   setSource(source: boolean) {
     if (source === this.source) return;
-    const sequence = ++this.modeSequence, view = this.view;
+    const view = this.view;
+    const doc = view.state.doc;
+    const previous = this.modeViewport;
+    const visible = viewportAnchor(view);
+    const unchanged = previous?.doc === doc && previous.destinationTop !== null && Math.abs(previous.destinationTop - view.scrollDOM.scrollTop) < 1;
+    const target = unchanged ? previous.origin : { ...visible, offset: visible.block ? Math.max(0, visible.offset) : visible.offset };
+    const transition = { doc, origin: visible, destinationTop: null as number | null };
+    this.modeViewport = transition;
     let selection = view.state.selection.main;
     const focused = document.activeElement?.closest<HTMLElement>('.md-block');
     const nested = focused && widgetEditors.get(focused);
     if (source && focused && nested) {
-      const ctx = (focused as any).context as Context;
-      const body = ctx.from + ctx.source.indexOf('\n') + 1;
-      const map = (position: number) => { const line = nested.state.doc.lineAt(position), raw = view.state.doc.line(Math.min(view.state.doc.lines, view.state.doc.lineAt(body).number + line.number - 1)); const prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0; return Math.min(raw.to, raw.from + prefix + position - line.from); };
+      const map = (position: number) => codeToSource(view, focused, nested, position);
       selection = EditorSelection.range(map(nested.state.selection.main.anchor), map(nested.state.selection.main.head));
     } else if (source && focused) {
       const ctx = (focused as any).context as Context, cell = document.activeElement?.closest<HTMLElement>('th,td'), field = focused.querySelector<HTMLTextAreaElement>('textarea');
@@ -490,38 +586,68 @@ export class MarkdownEditor {
       } else if (field && document.activeElement === field) { const base = ctx.from + ctx.source.indexOf('\n') + 1; selection = EditorSelection.range(base + field.selectionStart, base + field.selectionEnd); }
     }
     const anchor = selection.anchor, head = selection.head;
-    view.dispatch({ effects: [sourceEffect.of(source), EditorView.scrollIntoView(head, { y: 'center' })], selection: { anchor, head } });
-    view.dom.dataset.source = String(source); view.focus();
-    const locate = () => {
-      if (!view.dom.isConnected || sequence !== this.modeSequence || view.state.selection.main.head !== head || view.state.selection.main.anchor !== anchor) return;
-      let target: EditorView | undefined; let fieldRect: DOMRect | undefined;
-      if (!source) {
-        const root = [...view.dom.querySelectorAll<HTMLElement>('.md-block')].find(root => Number(root.dataset.from) <= head && Number(root.dataset.to) >= head);
-        const code = root && widgetEditors.get(root);
-        if (root && code && anchor >= Number(root.dataset.from) && anchor <= Number(root.dataset.to)) {
-          const ctx = (root as any).context as Context, body = ctx.from + ctx.source.indexOf('\n') + 1;
-          const map = (position: number) => { const raw = view.state.doc.lineAt(Math.max(body, position)), n = Math.max(1, Math.min(code.state.doc.lines, raw.number - view.state.doc.lineAt(body).number + 1)), line = code.state.doc.line(n), prefix = raw.text.endsWith(line.text) ? raw.length - line.length : 0; return line.from + Math.max(0, Math.min(line.length, position - raw.from - prefix)); };
-          code.dispatch({ selection: { anchor: map(anchor), head: map(head) }, effects: EditorView.scrollIntoView(map(head), { y: 'center' }) }); code.focus(); target = code;
-        } else if (root?.classList.contains('md-table')) {
-          const ctx = (root as any).context as Context;
-          for (const [r, row] of (ctx.node.children ?? []).entries()) for (const [c, cell] of (row.children ?? []).entries()) if (head >= startOf(cell) && head <= endOf(cell) && anchor >= startOf(cell) && anchor <= endOf(cell)) {
-            const field = root.querySelector<HTMLElement>(`[data-row="${r}"][data-col="${c}"]`); if (!field) continue; field.focus();
-            const raw = view.state.sliceDoc(startOf(cell), endOf(cell)), base = startOf(cell) + /^\|?[ \t]*/.exec(raw)![0].length, node = field.firstChild;
-            if (node) { const range = document.createRange(), length = node.textContent?.length ?? 0; range.setStart(node, Math.max(0, Math.min(length, Math.min(anchor, head) - base))); range.setEnd(node, Math.max(0, Math.min(length, Math.max(anchor, head) - base))); const native = window.getSelection(); native?.removeAllRanges(); native?.addRange(range); }
-            fieldRect = field.getBoundingClientRect();
-          }
-        } else if (root?.classList.contains('md-math')) {
-          const field = root.querySelector<HTMLTextAreaElement>('textarea'); if (field) { const ctx = (root as any).context as Context, base = ctx.from + ctx.source.indexOf('\n') + 1; field.focus(); field.setSelectionRange(Math.max(0, anchor - base), Math.max(0, head - base)); fieldRect = field.getBoundingClientRect(); }
-        }
+    const scroll = EditorView.scrollIntoView(target.position, { y: 'start', yMargin: target.offset });
+    view.dom.dataset.source = String(source);
+    view.dispatch({ effects: [sourceEffect.of(source), scroll], selection: { anchor, head } });
+    view.focus();
+    const current = () => view.dom.isConnected && this.modeViewport === transition && view.state.doc === doc
+      && view.state.selection.main.anchor === anchor && view.state.selection.main.head === head;
+    const align = () => {
+      const scroller = view.scrollDOM;
+      if (target.atTop) scroller.scrollTop = 0;
+      else {
+        const top = viewportPositionTop(view, target);
+        scroller.scrollTop += top - scroller.getBoundingClientRect().top - target.offset;
       }
-      const editor = target ?? view;
-      editor.requestMeasure({ read: current => fieldRect ?? current.coordsAtPos(current.state.selection.main.head), write: coords => {
-        if (!coords || sequence !== this.modeSequence || !view.dom.isConnected) return;
-        const rect = view.scrollDOM.getBoundingClientRect();
-        view.scrollDOM.scrollTop += coords.top - rect.top - rect.height * .4;
-      } });
+      transition.destinationTop = scroller.scrollTop;
     };
-    requestAnimationFrame(() => requestAnimationFrame(locate));
+    requestAnimationFrame(() => {
+      if (!current()) return;
+      align();
+      requestAnimationFrame(() => {
+        if (!current()) return;
+        align();
+        if (!source) this.focusVisibleWidget(anchor, head);
+      });
+    });
+  }
+
+  private focusVisibleWidget(anchor: number, head: number) {
+    const view = this.view, root = widgetAt(view, head);
+    if (!root) return;
+    const bounds = view.scrollDOM.getBoundingClientRect();
+    const visible = (rect: { top: number; bottom: number }) => rect.bottom > bounds.top && rect.top < bounds.bottom;
+    const code = widgetEditors.get(root);
+    if (code && anchor >= Number(root.dataset.from) && anchor <= Number(root.dataset.to)) {
+      const position = sourceToCode(view, root, code, head);
+      const rect = code.coordsAtPos(position);
+      if (!rect || !visible(rect)) return;
+      code.dispatch({ selection: { anchor: sourceToCode(view, root, code, anchor), head: position } });
+      code.focus();
+    } else if (root.classList.contains('md-table')) {
+      const context = (root as any).context as Context;
+      for (const [r, row] of (context.node.children ?? []).entries()) for (const [c, cell] of (row.children ?? []).entries()) {
+        const start = startOf(cell), end = endOf(cell);
+        if (Math.min(anchor, head) < start || Math.max(anchor, head) > end) continue;
+        const field = root.querySelector<HTMLElement>(`[data-row="${r}"][data-col="${c}"]`);
+        if (!field || !visible(field.getBoundingClientRect())) return;
+        field.focus({ preventScroll: true });
+        const raw = view.state.sliceDoc(start, end), base = start + /^\|?[ \t]*/.exec(raw)![0].length, node = field.firstChild;
+        if (node) {
+          const range = document.createRange(), length = node.textContent?.length ?? 0;
+          range.setStart(node, Math.max(0, Math.min(length, Math.min(anchor, head) - base)));
+          range.setEnd(node, Math.max(0, Math.min(length, Math.max(anchor, head) - base)));
+          const native = window.getSelection(); native?.removeAllRanges(); native?.addRange(range);
+        }
+        return;
+      }
+    } else if (root.classList.contains('md-math') && visible(root.getBoundingClientRect())) {
+      const field = root.querySelector<HTMLTextAreaElement>('textarea');
+      if (!field) return;
+      const base = blockBodyStart(root);
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(Math.max(0, anchor - base), Math.max(0, head - base));
+    }
   }
 
   replace(content: string) { if (this.view.compositionStarted && this.view.state.field(quoteCompositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }

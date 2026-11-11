@@ -139,7 +139,7 @@ test('重绑撤销和粘贴作用于代码编辑器，旧快捷键停用且高�
   } finally { await application.close(); }
 });
 
-test('源码与排版切换定位正文、长代码及表格的当前光标，不改正文与撤销历史', async () => {
+test('源码与排版切换保留可见光标的编辑位置及撤销历史', async () => {
   const { application, page } = await launch();
   const prefix = Array.from({ length: 60 }, (_, n) => `第 ${n} 段：正文用于检查滚动位置。\n\n`).join('');
   const code = Array.from({ length: 90 }, (_, n) => `int value_${n} = ${n};`).join('\n');
@@ -147,9 +147,10 @@ test('源码与排版切换定位正文、长代码及表格的当前光标，�
   try {
     await setContent(page, raw);
     for (const needle of ['当前位置', 'value_65', '目标单元格']) {
-      await page.evaluate(position => { const e = (window as any).__editor.active(); e.setSource(true); e.view.dispatch({ selection: { anchor: position } }); e.focus(); }, raw.indexOf(needle) + 2);
+      if (!await page.evaluate(() => (window as any).__editor.active().source)) await page.keyboard.press('Control+/');
+      await page.evaluate(position => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: position }, effects: e.view.constructor.scrollIntoView(position, { y: 'start', yMargin: 60 }) }); e.focus(); }, raw.indexOf(needle) + 2);
+      await expect.poll(() => page.evaluate(() => { const { view } = (window as any).__editor.active(); const cursor = view.coordsAtPos(view.state.selection.main.head); const bounds = view.scrollDOM.getBoundingClientRect(); return !!cursor && cursor.top >= bounds.top && cursor.bottom <= bounds.bottom; })).toBe(true);
       await page.keyboard.press('Control+/');
-      await expect.poll(() => page.evaluate(() => (window as any).__editor.active().view.scrollDOM.scrollTop)).toBeGreaterThan(500);
       if (needle === 'value_65') await expect(current(page).locator('.code-content .cm-content')).toBeFocused();
       if (needle === '目标单元格') await expect(current(page).locator('td').first()).toBeFocused();
       await page.keyboard.insertText('X'); await expect.poll(() => content(page)).toBe(raw.slice(0, raw.indexOf(needle) + 2) + 'X' + raw.slice(raw.indexOf(needle) + 2));
@@ -158,6 +159,51 @@ test('源码与排版切换定位正文、长代码及表格的当前光标，�
       await expect.poll(() => page.evaluate(() => (window as any).__editor.active().source)).toBe(true);
       expect(await content(page)).toBe(raw);
     }
+  } finally { await application.close(); }
+});
+
+test('源码与排版切换跟随当前阅读位置，光标在屏幕外也不跳回去', async () => {
+  const { application, page } = await launch();
+  const prose = Array.from({ length: 80 }, (_, n) => `## 第 ${n} 节\n\n段落 ${n}：检查长文中正在阅读的位置。`).join('\n\n');
+  const code = Array.from({ length: 160 }, (_, n) => `int sample_${n} = ${n};`).join('\n');
+  const table = Array.from({ length: 70 }, (_, n) => `| 表格行 ${n}：定位测试 | 对应内容 |`).join('\n');
+  const raw = `${prose}\n\n\`\`\`cpp\n${code}\n\`\`\`\n\n| 标题 | 内容 |\n| --- | --- |\n${table}\n\n结束`;
+  const line = (text: string) => current(page).locator('.cm-line, .md-table tr').filter({ hasText: text }).first();
+  const offset = (text: string) => line(text).evaluate(el => el.getBoundingClientRect().top - el.closest('.markdown-editor')!.querySelector('.cm-scroller')!.getBoundingClientRect().top);
+  const atTop = async (text: string) => {
+    await line(text).evaluate(el => { const scroller = el.closest('.markdown-editor')!.querySelector('.cm-scroller')!; scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 5; });
+    await expect.poll(() => offset(text)).toBeCloseTo(-5, 0);
+  };
+  try {
+    const window = await application.browserWindow(page); await window.evaluate(w => { w.setBounds({ width: 1280, height: 850 }); w.show(); w.focus(); });
+    await setContent(page, raw);
+    const target = '段落 46：';
+    await page.evaluate(pos => { const { view } = (window as any).__editor.active(); view.dispatch({ selection: { anchor: 0 }, effects: view.constructor.scrollIntoView(pos, { y: 'center' }) }); }, raw.indexOf(target));
+    await atTop(target);
+    const before = await offset(target);
+    await page.keyboard.press('Control+/');
+    await expect.poll(async () => Math.abs(await offset(target) - before)).toBeLessThan(2);
+    await page.locator('#source-mode').click();
+    await expect.poll(async () => Math.abs(await offset(target) - before)).toBeLessThan(2);
+
+    await page.keyboard.press('Control+/');
+    await expect.poll(async () => Math.abs(await offset(target) - before)).toBeLessThan(2);
+    const codeTarget = 'int sample_120 =';
+    await page.evaluate(pos => { const { view } = (window as any).__editor.active(); view.dispatch({ effects: view.constructor.scrollIntoView(pos, { y: 'center' }) }); }, raw.indexOf(codeTarget));
+    await atTop(codeTarget);
+    await page.keyboard.press('Control+/');
+    await expect.poll(async () => Math.abs(await offset(codeTarget) + 5)).toBeLessThan(2);
+    await page.keyboard.press('Control+/');
+    await expect.poll(async () => Math.abs(await offset(codeTarget) + 5)).toBeLessThan(2);
+    const tableTarget = '表格行 26：';
+    await page.evaluate(pos => { const { view } = (window as any).__editor.active(); view.dispatch({ effects: view.constructor.scrollIntoView(pos, { y: 'center' }) }); }, raw.indexOf(tableTarget));
+    await atTop(tableTarget);
+    await page.locator('#source-mode').click();
+    await expect.poll(async () => Math.abs(await offset(tableTarget) + 5)).toBeLessThan(2);
+    await page.keyboard.press('Control+/');
+    await expect.poll(async () => Math.abs(await offset(tableTarget) + 5)).toBeLessThan(2);
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(0);
+    expect(await content(page)).toBe(raw);
   } finally { await application.close(); }
 });
 
