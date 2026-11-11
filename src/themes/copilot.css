@@ -135,7 +135,6 @@
 }
 
 :root[data-theme='copilot'] .md-rule hr { border-color: #31363b; }
-:root[data-theme='copilot'] .md-table { padding-top: 24px; }
 :root[data-theme='copilot'] .md-diagram { padding: 10px; border: 0; background: transparent; }
 :root[data-theme='copilot'] .md-diagram:not(:hover):not(:focus-within) .code-toolbar { display: none; }
 

@@ -273,31 +273,73 @@ class BlockWidget extends WidgetType {
     root.addEventListener('keydown', event => { if (event.key === 'ArrowDown' && code.state.selection.main.head === code.state.doc.length) { event.preventDefault(); enterAfter(outer, ((root as any).context as Context).to); } });
   }
   table(root: HTMLElement, outer: EditorView) {
-    const toolbar = document.createElement('div'); toolbar.className = 'table-toolbar'; const table = document.createElement('table');
-    let rows = tableRows(this.context.source); let align = this.context.node.align ?? []; let currentRow = 1; let currentCol = 0;
-    const commit = (isolated = false) => { const ctx: Context = (root as any).context; outer.dispatch({ changes: { from: ctx.from, to: ctx.to, insert: serializeTable(rows, align) }, annotations: isolated ? isolateHistory.of('full') : undefined }); };
-    const action = (label: string, glyph: IconName, title: string, handler: () => void) => { const button = document.createElement('button'); button.innerHTML = icon(glyph); button.append(document.createTextNode(label.replace(/^[+−]\s*/, ''))); button.setAttribute('aria-label', label); button.title = title; button.onmousedown = event => event.preventDefault(); button.onclick = handler; toolbar.append(button); };
-    action('+ 行', 'add', '在当前行后插入一行', () => { rows.splice(currentRow + 1, 0, rows[0].map(() => '')); commit(); });
-    action('+ 列', 'add', '在当前列后插入一列', () => { for (const row of rows) row.splice(currentCol + 1, 0, ''); align.splice(currentCol + 1, 0, null); commit(); });
-    action('− 行', 'remove', '删除当前数据行', () => { if (currentRow > 0 && rows.length > 2) { rows.splice(currentRow, 1); commit(); } });
-    action('− 列', 'remove', '删除当前列', () => { if (rows[0].length > 1) { for (const row of rows) row.splice(currentCol, 1); align.splice(currentCol, 1); commit(); } });
-    for (const [label, value, glyph] of [['左', 'left', 'arrow-left'], ['中', 'center', 'dash'], ['右', 'right', 'arrow-right']] as const) action(label, glyph, '设置当前列对齐', () => { align[currentCol] = value; commit(); });
+    const toolbar = document.createElement('div'); toolbar.className = 'table-toolbar';
+    toolbar.setAttribute('role', 'group'); toolbar.setAttribute('aria-label', '表格操作');
+    const table = document.createElement('table');
+    let rows = tableRows(this.context.source);
+    let align = this.context.node.align ?? [];
+    let currentRow = Math.min(1, rows.length - 1), currentCol = 0;
+    const commit = (isolated = false) => {
+      const ctx: Context = (root as any).context;
+      outer.dispatch({ changes: { from: ctx.from, to: ctx.to, insert: serializeTable(rows, align) }, annotations: isolated ? isolateHistory.of('full') : undefined });
+    };
+    const group = () => {
+      const element = document.createElement('div'); element.className = 'table-tool-group';
+      toolbar.append(element); return element;
+    };
+    const action = (group: HTMLElement, label: string, title: string, handler: () => void, glyph?: IconName, text = label) => {
+      const button = document.createElement('button'); button.type = 'button';
+      if (glyph) button.innerHTML = icon(glyph);
+      button.append(document.createTextNode(text)); button.setAttribute('aria-label', label); button.title = title;
+      button.onmousedown = event => event.preventDefault(); button.onclick = handler;
+      group.append(button); return button;
+    };
+    const focusCell = (row: number, column: number) => table.rows[row]?.cells[column]?.focus();
+    const insertRow = (index: number, column: number) => {
+      rows.splice(index, 0, rows[0].map(() => ''));
+      commit(true); focusCell(index, column);
+    };
+    const insertion = group();
+    action(insertion, '+ 行', '在当前行后插入一行', () => insertRow(currentRow + 1, currentCol), 'add', '行');
+    action(insertion, '+ 列', '在当前列后插入一列', () => {
+      const row = currentRow, column = currentCol + 1;
+      for (const values of rows) values.splice(column, 0, '');
+      align.splice(column, 0, null);
+      commit(true); focusCell(row, column);
+    }, 'add', '列');
+    const removal = group();
+    const removeRow = action(removal, '− 行', '删除当前数据行', () => {
+      rows.splice(currentRow, 1); commit(true);
+    }, 'remove', '行');
+    const removeColumn = action(removal, '− 列', '删除当前列', () => {
+      for (const row of rows) row.splice(currentCol, 1);
+      align.splice(currentCol, 1); commit(true);
+    }, 'remove', '列');
+    const alignment = group();
+    const alignButtons = ([['左', '左对齐', 'left'], ['中', '居中对齐', 'center'], ['右', '右对齐', 'right']] as const).map(([text, label, value]) => ({
+      value, button: action(alignment, label, `当前列${label}`, () => { align[currentCol] = value; commit(true); }, undefined, text),
+    }));
+    const updateToolbar = () => {
+      removeRow.disabled = currentRow === 0 || rows.length <= 2;
+      removeColumn.disabled = rows[0].length <= 1;
+      for (const { value, button } of alignButtons) button.setAttribute('aria-pressed', String(value === (align[currentCol] ?? 'left')));
+    };
     const draw = () => {
       table.replaceChildren(); rows.forEach((row, index) => { const tr = document.createElement('tr'); row.forEach((value, col) => {
         const cell = document.createElement(index === 0 ? 'th' : 'td'); cell.tabIndex = 0; cell.style.textAlign = align[col] ?? ''; cell.dataset.row = String(index); cell.dataset.col = String(col); cell.dataset.value = value;
         const ast = parseMarkdown(value); appendChildren(cell, ast.children?.[0]?.children ?? [], this.context.host);
-        cell.onfocus = () => { currentRow = index; currentCol = col; cell.contentEditable = 'true'; cell.textContent = rows[index][col]; const range = document.createRange(); range.selectNodeContents(cell); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); };
+        cell.onfocus = () => { currentRow = index; currentCol = col; updateToolbar(); cell.contentEditable = 'true'; cell.textContent = rows[index][col]; const range = document.createRange(); range.selectNodeContents(cell); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); };
         cell.onblur = () => { const value = cell.textContent ?? ''; cell.contentEditable = 'false'; if (value !== rows[index][col]) { rows[index][col] = value; commit(); } cell.replaceChildren(); appendChildren(cell, parseMarkdown(value).children?.[0]?.children ?? [], this.context.host); };
         cell.onbeforeinput = event => event.stopPropagation(); cell.onpaste = event => event.stopPropagation();
         cell.oninput = event => { event.stopPropagation(); rows[index][col] = cell.textContent ?? ''; commit(!event.isTrusted); };
         cell.onkeydown = event => {
           event.stopPropagation();
-          if (event.key === 'Tab') { event.preventDefault(); const cells = [...table.querySelectorAll<HTMLElement>('th,td')]; const next = cells[cells.indexOf(cell) + (event.shiftKey ? -1 : 1)]; if (next) next.focus(); else if (!event.shiftKey) { cell.blur(); rows.push(rows[0].map(() => '')); commit(); table.querySelector<HTMLElement>('tr:last-child td')?.focus(); } }
+          if (event.key === 'Tab') { event.preventDefault(); const cells = [...table.querySelectorAll<HTMLElement>('th,td')]; const next = cells[cells.indexOf(cell) + (event.shiftKey ? -1 : 1)]; if (next) next.focus(); else if (!event.shiftKey) { cell.blur(); insertRow(rows.length, 0); } }
           if (event.key === 'Enter') { event.preventDefault(); cell.blur(); enterAfter(outer, ((root as any).context as Context).to); }
           if (event.key === 'Escape') { event.preventDefault(); cell.textContent = rows[index][col]; cell.blur(); outer.focus(); }
         }; tr.append(cell);
       }); table.append(tr); });
-    }; draw(); const content = document.createElement('div'); content.className = 'table-content'; content.append(table); root.append(toolbar, content);
+    }; draw(); updateToolbar(); const content = document.createElement('div'); content.className = 'table-content'; content.append(table); root.append(toolbar, content);
     (root as any).syncTable = (ctx: Context) => {
       const focused = root.contains(document.activeElement) && document.activeElement?.matches('th[contenteditable=true],td[contenteditable=true]') ? document.activeElement as HTMLElement : null;
       const oldText = focused?.textContent ?? ''; const native = window.getSelection(); let anchor = 0, head = 0;
@@ -305,6 +347,8 @@ class BlockWidget extends WidgetType {
       if (focused && native) { anchor = offset(native.anchorNode, native.anchorOffset); head = offset(native.focusNode, native.focusOffset); }
       const r = Number(focused?.dataset.row ?? 0), c = Number(focused?.dataset.col ?? 0);
       rows = tableRows(ctx.source); align = ctx.node.align ?? [];
+      currentRow = Math.min(currentRow, rows.length - 1); currentCol = Math.min(currentCol, rows[0].length - 1);
+      updateToolbar();
       const structural = table.rows.length !== rows.length || [...table.rows].some((row, index) => row.cells.length !== rows[index]?.length);
       if (!focused || structural) { if (focused) focused.onblur = null; draw(); }
       const field = focused ? table.rows[Math.min(r, rows.length - 1)]?.cells[Math.min(c, rows[0].length - 1)] : null;

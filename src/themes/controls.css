@@ -22,8 +22,6 @@ details > summary { display: flex; align-items: center; gap: 6px; list-style: no
 details > summary::-webkit-details-marker { display: none; }
 details > summary .tree-chevron { transition: transform 80ms ease; }
 details[open] > summary .tree-chevron { transform: rotate(90deg); }
-.table-toolbar button { display: inline-flex; align-items: center; gap: 3px; }
-.table-toolbar .replica-icon { width: 14px; height: 14px; }
 .code-toolbar .code-copy .replica-icon { width: 16px; height: 16px; }
 .menu-check { display: inline-flex; align-items: center; justify-content: center; }
 #tabbar.drag-over { box-shadow: none; }
@@ -108,15 +106,6 @@ details > summary:hover { background: var(--hover); }
 :root[data-theme] .md-strong, :root[data-theme] .md-strong span { font-weight: 700 !important; }
 :root[data-theme] .md-quote { color: var(--fg); background: color-mix(in srgb, var(--link) 7%, transparent); border-left: 3px solid color-mix(in srgb, var(--link) 50%, transparent); border-radius: 0 5px 5px 0; padding: 2px 16px !important; }
 .md-widget { padding: 18px 0; }
-:root[data-theme] .md-table { padding-top: 28px; }
-:root[data-theme] .md-table td, :root[data-theme] .md-table th { padding: 9px 16px; border-color: var(--border); }
-:root[data-theme] .md-table th { background: color-mix(in srgb, var(--link) 7%, var(--bg)); }
-.md-table tr:nth-child(2n) { background: transparent; }
-.md-table tbody tr:hover, .md-table tr:focus-within { background: color-mix(in srgb, var(--link) 4%, transparent); }
-.table-toolbar { gap: 4px; }
-.md-table { overflow: visible; }
-.table-content { max-width: 100%; overflow-x: auto; }
-.table-toolbar button { border-radius: 4px; padding: 3px 6px; color: var(--muted); }
 .markdown-editor .cm-selectionBackground { background: var(--selection) !important; }
 .cm-editor[data-source='true'] > .cm-scroller > .cm-content { font-size: .9em; }
 .workspace>main>footer { height: 32px; gap: 7px; padding: 0 14px; border-top: 1px solid var(--border); color: var(--muted); background: var(--bg); }
@@ -260,6 +249,98 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .quick-empty { margin: 0; font-size: 13px; }
 .cm-search { padding: 9px 12px !important; gap: 6px; border-bottom: 1px solid var(--border); background: var(--surface) !important; font: 12px/1.6 var(--ui-font); }
 .cm-search input[type=text], .cm-search input:not([type]), .cm-search button { min-height: 28px; border-radius: 4px; }
-.table-toolbar { padding: 2px; gap: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
-.table-toolbar button { min-height: 20px; border: 0; background: transparent; border-radius: 4px; }
-.table-toolbar button:hover { background: var(--hover); }
+
+:root[data-theme] .md-widget:has(> .md-table) { padding-block-start: 4px; }
+:root[data-theme] .md-table {
+  --table-cell-bg: var(--bg);
+  --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--bg));
+  --table-border: var(--border);
+  --table-selection: color-mix(in srgb, var(--ui-accent) 28%, var(--bg));
+  --table-cell-padding: 8px;
+  inline-size: fit-content;
+  min-inline-size: 40%;
+  max-inline-size: 100%;
+  margin: 0 auto;
+}
+.table-content {
+  overflow-x: auto;
+  border: 1px solid var(--table-border);
+  border-radius: var(--ui-radius);
+  background: var(--table-cell-bg);
+}
+.md-table table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 1em;
+  line-height: 1.7;
+}
+.md-table :is(th, td) {
+  height: calc(1lh + 2 * var(--table-cell-padding) + 1px);
+  min-width: 70px;
+  padding: var(--table-cell-padding) 12px;
+  border-inline-end: 1px solid var(--table-border);
+  border-block-end: 1px solid var(--table-border);
+  text-align: left;
+  vertical-align: top;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.md-table :is(th, td):last-child { border-inline-end: 0; }
+.md-table tr:last-child > :is(th, td) { border-block-end: 0; }
+.md-table th { background: var(--table-header-bg); font-weight: 600; }
+.md-table td { background: var(--table-cell-bg); }
+.md-table td:hover { background: color-mix(in srgb, var(--ui-accent) 5%, var(--table-cell-bg)); }
+.md-table :is(th, td):focus {
+  background: color-mix(in srgb, var(--ui-accent) 9%, var(--table-cell-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent) 65%, transparent);
+  caret-color: var(--fg);
+}
+/* CodeMirror applies the system Highlight with !important to focused widgets. */
+:root[data-theme] .markdown-editor .md-table :is(th, td)::selection,
+:root[data-theme] .markdown-editor .md-table :is(th, td) *::selection {
+  color: var(--fg);
+  background-color: var(--table-selection) !important;
+}
+.md-table a { color: var(--ui-accent); }
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 5px auto;
+  padding: 2px;
+  border: 1px solid var(--table-border);
+  border-radius: var(--ui-radius);
+  background: var(--bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ui-motion-fast) ease;
+}
+.md-table:hover .table-toolbar, .md-table:focus-within .table-toolbar { opacity: 1; pointer-events: auto; }
+.table-tool-group { display: flex; flex: none; gap: 1px; padding-inline: 2px; }
+.table-tool-group + .table-tool-group { border-inline-start: 1px solid var(--table-border); }
+.table-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  font: 12px/1 var(--ui-font);
+  white-space: nowrap;
+}
+.table-toolbar .replica-icon { width: 13px; height: 13px; }
+.table-toolbar button:not(:disabled):hover, .table-toolbar button[aria-pressed='true'] {
+  color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 13%, transparent);
+}
+.table-toolbar button:focus-visible { outline-color: var(--ui-accent); outline-offset: -2px; }

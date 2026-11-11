@@ -28,14 +28,16 @@
 :root[data-theme='workbuddy'] .md-quote { padding: 2px 0 2px 14px !important; border-left: 3px solid #ffffff26; border-radius: 0; background: transparent; color: #b3b7b5; }
 :root[data-theme='workbuddy'] .md-inline-code { font: .93em/1.7 var(--wb-mono); padding: .15em .35em; color: #ffffffe6; background: #c8c8c826; border: 0; border-radius: 4px; }
 :root[data-theme='workbuddy'] .md-widget { padding: 12px 0; }
-:root[data-theme='workbuddy'] .md-table { padding-top: 0; }
-:root[data-theme='workbuddy'] .table-toolbar { top: -28px; }
-:root[data-theme='workbuddy'] .table-toolbar button { font: 11px/1.4 var(--ui-font); padding: 2px 5px; }
-:root[data-theme='workbuddy'] .md-table table { width: 100%; min-width: 0; background: #131414; font-size: .9375em; }
-:root[data-theme='workbuddy'] .md-table td, :root[data-theme='workbuddy'] .md-table th { padding: 8px 12px; border: 1px solid #3a3b3b; background: #131414; vertical-align: top; text-align: left; }
+
+:root[data-theme='workbuddy'] .md-table {
+  --table-cell-bg: #131414;
+  --table-header-bg: #252526;
+  --table-border: #3a3b3b;
+  inline-size: 100%;
+}
+:root[data-theme='workbuddy'] .md-table table { font-size: .9375em; }
 :root[data-theme='workbuddy'] .md-table strong { font-weight: 600; }
-:root[data-theme='workbuddy'] .md-table th { background: #252526; color: #ffffffe6; font-weight: 600; }
-:root[data-theme='workbuddy'] .md-table [contenteditable='true'] { background: #1f1f1f; }
+:root[data-theme='workbuddy'] .md-table th { color: #ffffffe6; }
 :root[data-theme='workbuddy'] .md-code:not(.md-diagram) { border-radius: 10px; box-shadow: none; }
 :root[data-theme='workbuddy'] .code-content .cm-scroller { font-family: var(--wb-mono) !important; font-size: calc(var(--font-size) * .875); line-height: 1.7 !important; }
 :root[data-theme='workbuddy'] .code-content .cm-content { font-family: inherit; min-width: 0; flex-grow: 1; padding: 10px 16px 10px 0 !important; }

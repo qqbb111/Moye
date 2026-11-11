@@ -650,6 +650,51 @@ test('表格单元格、Tab 导航、扩展行列和代码块连续输入', asyn
   } finally { await application.close(); }
 });
 
+test('表格空行保持一行高度，选区使用柔和主题色，插入行后直接编辑', async () => {
+  const { application, page } = await launch();
+  try {
+    await setContent(page, '## 连通性与环\n\n| 题面信号 | 去哪 |\n| --- | --- |\n| 割点与桥 | 双连通分量 |\n|  |  |\n');
+    const table = current(page).locator('.md-table table');
+    const dataRow = table.locator('tr').nth(1);
+    const emptyRow = table.locator('tr').nth(2);
+    await expect.poll(async () => Math.abs((await dataRow.boundingBox())!.height - (await emptyRow.boundingBox())!.height)).toBeLessThan(1);
+
+    const cell = dataRow.locator('td').first();
+    await cell.click();
+    await page.keyboard.press('Control+a');
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('割点与桥');
+    const selection = await cell.evaluate(element => {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = getComputedStyle(element, '::selection').backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data);
+    });
+    expect(selection[3]).toBe(255);
+    expect(selection[2]).toBeLessThanOrEqual(selection[1]);
+
+    const toolbar = current(page).getByRole('group', { name: '表格操作' });
+    const buttons = (await toolbar.boundingBox())!;
+    const grid = (await table.boundingBox())!;
+    expect(buttons.y + buttons.height).toBeLessThan(grid.y);
+    await toolbar.getByRole('button', { name: '+ 行', exact: true }).click();
+    await expect(table.locator('tr')).toHaveCount(4);
+    const inserted = table.locator('tr').nth(2);
+    await expect(inserted.locator('td').first()).toBeFocused();
+    expect(Math.abs((await inserted.boundingBox())!.height - (await dataRow.boundingBox())!.height)).toBeLessThan(1);
+    await page.keyboard.insertText('新增条目');
+    await expect.poll(() => content(page)).toContain('| 新增条目 |  |');
+    await toolbar.getByRole('button', { name: '居中对齐', exact: true }).click();
+    await expect(toolbar.getByRole('button', { name: '居中对齐', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(inserted.locator('td').first()).toHaveCSS('text-align', 'center');
+    await toolbar.getByRole('button', { name: '− 行', exact: true }).click();
+    await expect(table.locator('tr')).toHaveCount(3);
+    await page.keyboard.press('Control+z');
+    await expect(table.locator('tr')).toHaveCount(4);
+    await expect(inserted).toContainText('新增条目');
+  } finally { await application.close(); }
+});
+
 test('公式、任务勾选、源码修改和深浅主题', async () => {
   const { application, page } = await launch();
   try {
