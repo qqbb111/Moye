@@ -33,19 +33,19 @@ details[open] > summary .tree-chevron { transform: rotate(90deg); }
   --prose-font: 'Open Sans', '霞鹜文楷', 'LXGW WenKai', 'Microsoft YaHei UI', sans-serif;
   --bg: #fbfaf7; --fg: #343c3c; --muted: #737e7c; --surface: #f1f1ed;
   --border: #dfe3df; --hover: #e6ebe6; --link: #47786b; --code: #edf0ea;
-  --accent-soft: #dfece4; --chrome: #f5f5f0; --selection: #8dbda74d;
+  --accent-soft: #dfece4; --chrome: #f5f5f0; --selection: #8dbda74d; --highlight-tint: #a97e4b;
   --reading-width: 880px; --sidebar-width: 256px;
   font-family: var(--ui-font); font-synthesis: weight;
 }
 :root[data-theme='dark'] {
   --bg: #202426; --fg: #dce0df; --muted: #9aa5a1; --surface: #1b1f21;
   --border: #353c3d; --hover: #303a38; --link: #a2c9ba; --code: #2a3330;
-  --accent-soft: #30433c; --chrome: #1b2022; --selection: #81baa04d;
+  --accent-soft: #30433c; --chrome: #1b2022; --selection: #81baa04d; --highlight-tint: #c3a37a;
 }
 :root[data-theme='copilot'] {
   --bg: #191d20; --fg: #d6dce1; --muted: #9aa5af; --surface: #15191c;
   --border: #30383f; --hover: #29333b; --link: #a4c9df; --code: #2a333c;
-  --accent-soft: #283c4c; --chrome: #161b1e; --selection: #81aac04d;
+  --accent-soft: #283c4c; --chrome: #161b1e; --selection: #81aac04d; --highlight-tint: #bea07c;
 }
 .titlebar { height: 35px; background: var(--chrome); }
 .app-mark { gap: 8px; margin: 0 16px; color: var(--muted); }
@@ -108,7 +108,7 @@ details > summary:hover { background: var(--hover); }
 .md-widget { padding: 18px 0; }
 .markdown-editor :is(.md-highlight, mark) {
   color: inherit;
-  background-color: color-mix(in srgb, var(--ui-accent) 24%, transparent);
+  background-color: color-mix(in srgb, var(--highlight-tint) 24%, transparent);
   border-radius: .16em;
   box-decoration-break: clone;
 }
