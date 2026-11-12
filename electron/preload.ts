@@ -29,6 +29,7 @@ const bridge: RypotaBridge = {
   openExternal: url => ipcRenderer.invoke('link:open', url),
   openFolder: () => ipcRenderer.invoke('folder:open'),
   openParentFolder: path => ipcRenderer.invoke('folder:parent', path),
+  openChildFolder: (current, path) => ipcRenderer.invoke('folder:child', current, path),
   listFolder: path => ipcRenderer.invoke('folder:list', path),
   openFolderFile: path => ipcRenderer.invoke('folder:file', path),
   insertImage: (id, data) => ipcRenderer.invoke('image:insert', id, data),

@@ -94,9 +94,11 @@ export class PrintPreview {
         const host = { id: snapshot.id, media: (url: string) => this.media(snapshot.id, url), link: () => {}, changed: () => {} };
         const prefix = printPrefix(snapshot.content);
         if (prefix?.trim()) {
-          void printHTML(prefix, snapshot.title, host, options, signal).then(first => {
-            if (!signal.aborted && !request.final) return window.rypota.previewPdfFirstPage(snapshot.id, first, options, request.id);
+          void printHTML(prefix, snapshot.title, host, options, signal, true).then(first => {
+            if (!signal.aborted && !request.final) void window.rypota.previewPdfFirstPage(snapshot.id, first, options, request.id).catch(() => {});
           }).catch(() => {});
+          // Give the lightweight prefix a turn before parsing the whole document.
+          if (options.color === 'mono') await new Promise<void>(resolve => setTimeout(resolve, 0));
         }
         html = await printHTML(snapshot.content, snapshot.title, host, options, signal);
         if (source === this.preparedSource && html.length <= 2 * 1024 * 1024) { this.prepared.set(key, html); if (this.prepared.size > 4) this.prepared.delete(this.prepared.keys().next().value!); }
@@ -128,36 +130,94 @@ export class PrintPreview {
     if (this.loading) void this.loading.destroy().catch(() => {}); this.loading = undefined; this.pdf = undefined; if (!preservePages) this.get('#print-pages').replaceChildren();
   }
   private async paintPages() {
-    const pdf = this.pdf; if (!pdf) return false; const painting = ++this.paintGeneration, generation = this.generation;
-    this.observer?.disconnect(); for (const render of this.renders.values()) render.cancel(); this.renders.clear(); const pages = this.get('#print-pages');
-    const previous = pages.querySelector<HTMLCanvasElement>('.print-page[data-page="1"] canvas[data-ready=true]'), scrollTop = pages.scrollTop; pages.replaceChildren();
-    const first = await pdf.getPage(1); if (this.pdf !== pdf || painting !== this.paintGeneration) return false;
+    const pdf = this.pdf;
+    if (!pdf) return false;
+    const painting = ++this.paintGeneration, generation = this.generation;
+    const current = () => this.pdf === pdf && painting === this.paintGeneration;
+    this.observer?.disconnect();
+    for (const render of this.renders.values()) render.cancel();
+    this.renders.clear();
+    const pages = this.get('#print-pages');
+    const first = await pdf.getPage(1);
+    if (!current()) return false;
+    const scrollTop = pages.scrollTop;
+    const previous = new Map([...pages.querySelectorAll<HTMLCanvasElement>('canvas[data-ready=true]')].map(canvas => [Number(canvas.parentElement?.dataset.page), canvas]));
     const base = first.getViewport({ scale: 1 }), zoom = this.get<HTMLSelectElement>('#print-zoom').value;
     const scale = zoom === 'fit' ? Math.min(2, Math.max(.2, (pages.clientWidth - 52) / base.width)) : Number(zoom) * 96 / 72;
     const viewport = first.getViewport({ scale });
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        const element = entry.target as HTMLElement, number = Number(element.dataset.page);
-        if (entry.isIntersecting && !element.querySelector('canvas')) void draw(number, element);
-        else if (!entry.isIntersecting) { this.renders.get(number)?.cancel(); this.renders.delete(number); const canvas = element.querySelector('canvas'); if (canvas) { canvas.width = canvas.height = 0; canvas.remove(); } }
-      }
-    }, { root: pages, rootMargin: '500px' }); this.observer = observer;
-    const draw = async (number: number, element: HTMLElement) => {
-      const canvas = document.createElement('canvas'); element.append(canvas);
+    const clearCanvas = (canvas: HTMLCanvasElement) => { canvas.remove(); canvas.width = canvas.height = 0; };
+    const draw = async (element: HTMLElement) => {
+      const number = Number(element.dataset.page), canvas = document.createElement('canvas');
+      element.append(canvas);
+      let task: pdfjs.RenderTask | undefined;
       try {
-        const page = await pdf.getPage(number); if (this.pdf !== pdf || painting !== this.paintGeneration || !canvas.isConnected) return false;
-        const view = page.getViewport({ scale }), ratio = devicePixelRatio; canvas.width = Math.ceil(view.width * ratio); canvas.height = Math.ceil(view.height * ratio); canvas.style.width = `${view.width}px`; canvas.style.height = `${view.height}px`;
-        const task = page.render({ canvas, viewport: view, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] }); this.renders.set(number, task); await task.promise;
-        if (canvas.isConnected) { canvas.dataset.ready = 'true'; canvas.dataset.generation = String(generation); return true; }
-      } catch (error) { if ((error as Error).name !== 'RenderingCancelledException' && this.pdf === pdf && canvas.isConnected) { this.message(`页面预览失败：${(error as Error).message}`); this.finishBusy(); } }
+        const page = await pdf.getPage(number);
+        if (!current() || !canvas.isConnected) return false;
+        const view = page.getViewport({ scale }), ratio = devicePixelRatio;
+        canvas.width = Math.ceil(view.width * ratio); canvas.height = Math.ceil(view.height * ratio);
+        canvas.style.width = `${view.width}px`; canvas.style.height = `${view.height}px`;
+        task = page.render({ canvas, viewport: view, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
+        this.renders.set(number, task);
+        await task.promise;
+        if (current() && canvas.isConnected) {
+          canvas.dataset.ready = 'true'; canvas.dataset.generation = String(generation);
+          element.querySelectorAll<HTMLCanvasElement>('canvas[data-previous]').forEach(clearCanvas);
+          return true;
+        }
+      } catch (error) {
+        if ((error as Error).name !== 'RenderingCancelledException' && current() && canvas.isConnected) {
+          this.message(`页面预览失败：${(error as Error).message}`); this.finishBusy();
+        }
+      } finally {
+        if (task && this.renders.get(number) === task) this.renders.delete(number);
+      }
       return false;
     };
-    for (let index = 1; index <= pdf.numPages; index++) { const element = document.createElement('div'); element.className = 'print-page'; element.dataset.page = String(index); element.setAttribute('aria-label', `第 ${index} 页`); element.style.width = `${viewport.width}px`; element.style.height = `${viewport.height}px`; pages.append(element); }
-    if (previous && Math.abs(parseFloat(previous.style.width) - viewport.width) < 1 && Math.abs(parseFloat(previous.style.height) - viewport.height) < 1) { previous.style.position = 'absolute'; previous.style.inset = '0'; pages.firstElementChild!.append(previous); }
+    const fragment = document.createDocumentFragment();
+    for (let number = 1; number <= pdf.numPages; number++) {
+      const element = document.createElement('div'); element.className = 'print-page'; element.dataset.page = String(number); element.setAttribute('aria-label', `第 ${number} 页`);
+      element.style.width = `${viewport.width}px`; element.style.height = `${viewport.height}px`;
+      const old = previous.get(number);
+      if (old && Math.abs(parseFloat(old.style.width) - viewport.width) < 1 && Math.abs(parseFloat(old.style.height) - viewport.height) < 1) {
+        old.dataset.previous = 'true'; element.append(old); previous.delete(number);
+      }
+      fragment.append(element);
+    }
+    for (const canvas of previous.values()) clearCanvas(canvas);
+    pages.replaceChildren(fragment);
     pages.scrollTop = scrollTop;
-    const ready = await draw(1, pages.firstElementChild as HTMLElement);
-    if (ready && previous) { previous.remove(); previous.width = previous.height = 0; }
-    if (painting !== this.paintGeneration) return false;
+    const near = new Set<HTMLElement>();
+    let drawing = true;
+    const drawNext = async () => {
+      if (drawing || !current()) return;
+      const needed = [...near].filter(element => !element.querySelector('canvas:not([data-previous])'));
+      const offset = pages.getBoundingClientRect().top;
+      const next = needed.sort((a, b) => Math.abs(a.getBoundingClientRect().top - offset) - Math.abs(b.getBoundingClientRect().top - offset))[0];
+      if (!next) return;
+      drawing = true;
+      await draw(next);
+      drawing = false;
+      void drawNext();
+    };
+    const observer = new IntersectionObserver(entries => {
+      if (!current()) return;
+      for (const entry of entries) {
+        const element = entry.target as HTMLElement;
+        if (entry.isIntersecting) near.add(element);
+        else {
+          near.delete(element);
+          this.renders.get(Number(element.dataset.page))?.cancel();
+          element.querySelectorAll<HTMLCanvasElement>('canvas').forEach(clearCanvas);
+        }
+      }
+      void drawNext();
+    }, { root: pages, rootMargin: `${Math.min(1200, viewport.height + 24)}px 0px` });
+    this.observer = observer;
+    const top = pages.getBoundingClientRect().top;
+    const lead = [...pages.children].find(element => element.getBoundingClientRect().bottom > top) ?? pages.firstElementChild;
+    const ready = await draw(lead as HTMLElement);
+    if (!current()) return false;
+    drawing = false;
     for (const element of pages.children) observer.observe(element);
     return ready;
   }

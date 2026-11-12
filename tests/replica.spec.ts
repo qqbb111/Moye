@@ -27,7 +27,7 @@ async function toolbarAction(page: Page, section: string, action: string) {
 }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 
-test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯通桌面入口', async ({}, testInfo) => {
+test('文件菜单、目录进退、资源管理器、另存为和原位重命名贯通桌面入口', async ({}, testInfo) => {
   const { application, page, directory } = await launch();
   const rootFolder = path.join(directory, '笔记');
   const child = path.join(rootFolder, '算法');
@@ -40,6 +40,12 @@ test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯�
   await fs.writeFile(file, '# 编辑时的 Markdown');
   await fs.writeFile(occupied, '# 不能被覆盖');
   try {
+    const native = await application.browserWindow(page);
+    const screenshot = async (name: string) => {
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+      await fs.writeFile(testInfo.outputPath(name), Buffer.from(png, 'base64'));
+    };
     await application.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, child);
     await expect(page.locator('[data-toolbar-menu="导出"]')).toHaveCount(0);
     await toolbarAction(page, '文件', '打开文件夹');
@@ -47,11 +53,19 @@ test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯�
     const parent = sidebar.getByRole('button', { name: '上一级文件夹', exact: true });
     const footer = sidebar.getByRole('button', { name: '打开文件夹…', exact: true });
     const menu = page.getByRole('menu', { name: '文件操作', exact: true });
-    const rename = page.getByRole('dialog', { name: '重命名', exact: true });
-    const renameInput = rename.getByRole('textbox', { name: '文件名', exact: true });
+    const renameInput = page.getByRole('textbox', { name: '文件名', exact: true });
     await expect(sidebar.locator('#sidebar-content > :first-child')).toHaveText('..');
     await expect(sidebar.locator('.folder-heading')).toHaveText('算法');
     await expect(footer).toBeVisible();
+    await parent.click();
+    await expect(sidebar.locator('.folder-heading')).toHaveText('笔记');
+    const enter = sidebar.getByRole('button', { name: '进入 算法', exact: true });
+    await expect(enter).toBeFocused();
+    await expect(page.evaluate(({ rootFolder, directory }) => window.rypota.openChildFolder(rootFolder, directory), { rootFolder, directory })).rejects.toThrow('文件不在当前文件夹中');
+    await screenshot('folder-enter.png');
+    await enter.press('Enter');
+    await expect(sidebar.locator('.folder-heading')).toHaveText('算法');
+    await expect(parent).toBeFocused();
     await parent.click();
     await expect(sidebar.locator('.folder-heading')).toHaveText('笔记');
     await footer.click();
@@ -65,18 +79,28 @@ test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯�
     await expect(menu).toBeVisible();
     await menu.getByRole('menuitem', { name: '在资源管理器中显示', exact: true }).click();
     await expect.poll(() => application.evaluate(() => (globalThis as any).__shownInFolder)).toBe(file);
+    await originalRow.click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: /^重命名/ }).click();
+    await expect(renameInput).toBeFocused();
+    await renameInput.press('Escape');
+    await expect(originalRow).toBeFocused();
     await originalRow.focus();
     await page.keyboard.press('F2');
     await expect(renameInput).toHaveValue('原始.md');
+    await expect(sidebar.locator('.sidebar-row.inline-rename .inline-rename-input')).toBeFocused();
+    expect(await renameInput.evaluate(input => [(input as HTMLInputElement).selectionStart, (input as HTMLInputElement).selectionEnd])).toEqual([0, 2]);
+    await screenshot('rename-sidebar-light.png');
     await renameInput.fill('同名');
     await renameInput.press('Enter');
-    await expect(rename.getByRole('alert')).toHaveText('同名文件已存在');
+    await expect(page.locator('#toast')).toHaveText('同名文件已存在');
+    await expect(renameInput).toHaveAttribute('aria-invalid', 'true');
     expect(await fs.readFile(occupied, 'utf8')).toBe('# 不能被覆盖');
     await renameInput.fill('重命名成功');
     await renameInput.press('Enter');
-    await expect(rename).toBeHidden();
+    await expect(renameInput).toBeHidden();
     const renamedRow = sidebar.getByRole('button', { name: '重命名成功.md', exact: true });
     await expect(renamedRow).toBeVisible();
+    await expect(renamedRow).toBeFocused();
     expect(await fs.readFile(renamed, 'utf8')).toBe('# 编辑时的 Markdown');
     await expect(fs.stat(file)).rejects.toThrow();
 
@@ -90,12 +114,24 @@ test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯�
     await expect(activeTab).toHaveAttribute('aria-selected', 'true');
     await activeTab.dblclick();
     await expect(renameInput).toHaveValue('重命名成功.md');
-    await page.screenshot({ path: testInfo.outputPath('rename.png') });
+    await renameInput.press('Escape');
+    await expect(activeTab).toBeFocused();
+    await execute(page, 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await native.evaluate(window => { window.setBounds({ width: 760, height: 640 }); window.showInactive(); });
+    await current(page).locator('.cm-content').first().focus();
+    await page.keyboard.press('F2');
+    await expect(page.locator('#tabs .inline-rename-input')).toBeFocused();
+    await renameInput.press('ArrowLeft');
+    expect(await renameInput.evaluate(input => (input as HTMLInputElement).selectionEnd)).toBe(0);
+    await renameInput.dispatchEvent('keydown', { key: 'Enter', isComposing: true });
+    await expect(renameInput).toBeFocused();
+    await screenshot('rename-tab-dark-narrow.png');
     await renameInput.fill('标签重命名');
     await renameInput.press('Enter');
     await expect(page.getByRole('tab', { name: '标签重命名.md', exact: true })).toBeVisible();
     expect(await fs.readFile(tabRenamed, 'utf8')).toBe('# 编辑时的 Markdown');
-    await page.screenshot({ path: testInfo.outputPath('files.png') });
+    await screenshot('files.png');
 
     await execute(page, 'new');
     const backgroundCopy = path.join(child, '后台另存.md');
@@ -112,7 +148,7 @@ test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯�
     await sidebar.getByRole('button', { name: '草稿', exact: true }).click();
     const draftRow = sidebar.locator('[data-file-row]').first();
     await draftRow.dblclick();
-    await expect(rename).toBeVisible();
+    await expect(sidebar.locator('.inline-rename-input')).toBeFocused();
     await renameInput.fill('新草稿名');
     await renameInput.press('Enter');
     await expect(sidebar.getByRole('button', { name: '新草稿名', exact: true })).toBeVisible();
@@ -195,10 +231,17 @@ test('2026 代码主题独立于正文主题，设置文字不可拖选而输入
   try {
     await setContent(page, '正文文字\n\n```cpp\nint main() { return 0; }\n```');
     const block = current(page).locator('.md-code');
+    const theme = page.getByRole('button', { name: '主题', exact: true });
+    await theme.press('ArrowDown');
+    const palettes = page.getByRole('menu', { name: '主题' }).getByRole('group', { name: '代码配色' });
+    await expect(palettes.getByRole('menuitemradio', { name: 'GitHub Dark' })).toBeChecked();
+    await palettes.getByRole('menuitemradio', { name: '2026 现代深色' }).press('Enter');
+    await expect(palettes).toBeHidden();
+    await expect(block).toHaveCSS('background-color', 'rgb(18, 19, 20)');
+
     await execute(page, 'preferences');
     const picker = page.locator('#code-theme-select');
-    await picker.selectOption('dark-2026');
-    await expect(block).toHaveCSS('background-color', 'rgb(18, 19, 20)');
+    await expect(picker).toHaveValue('dark-2026');
     await picker.selectOption('light-2026');
     await expect(block).toHaveCSS('background-color', 'rgb(255, 255, 255)');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -535,6 +578,11 @@ test('长文先排版开头，整份完成前不可保存，接收旧请求的�
       const api = (globalThis as any).__replicaTest; api.windows.values().next().value.webContents.send('pdf:first-page', { requestId: '00000000-0000-0000-0000-000000000000', documentId: 'wrong-document', bytes: new Uint8Array(Buffer.from(first, 'base64')) });
     }, first);
     await expect(page.locator('.print-page')).toHaveCount(count); await expect(page.locator('#print-preview')).toHaveAttribute('data-preview-id', token!);
+    const last = page.locator('.print-page').last();
+    await expect(last.locator('canvas')).toHaveCount(0);
+    await last.evaluate(element => element.scrollIntoView({ block: 'start' }));
+    await expect(last.locator('canvas[data-ready=true]')).toBeVisible();
+    await expect(page.locator('.print-page').first().locator('canvas')).toHaveCount(0);
     const destination = path.join(directory, 'complete.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible(); expect(await content(page)).toBe(raw); expect(errors).toEqual([]);
   } finally { await application.close(); }
 });
@@ -921,8 +969,8 @@ test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌�
     const raw = '1. 代码段\n1. 数据段\n1. BSS 段\n1. 堆段\n1. 文件映射段\n1. 栈段\n\n结尾'; await setContent(page, raw);
     const labels = () => current(page).locator('.md-list-number').evaluateAll(markers => markers.map(marker => marker.getAttribute('data-list-marker')));
     await expect.poll(labels).toEqual(['1.', '2.', '3.', '4.', '5.', '6.']); expect(await content(page)).toBe(raw);
-    await expect(current(page).locator('.md-list-number').nth(1)).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
-    expect(await current(page).locator('.md-list-number').nth(1).evaluate(marker => getComputedStyle(marker, '::after').content)).toBe('"2."');
+    await expect(current(page).locator('.md-list-number').nth(1)).toHaveAttribute('contenteditable', 'false');
+    await expect(current(page).locator('.md-list-number').nth(1)).toHaveText('2.');
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 760 }); window.showInactive(); }); await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: testInfo.outputPath('ordered-list-preview.png') });
     const body = current(page).locator('.cm-line').filter({ hasText: 'BSS 段' }); const point = await body.evaluate(line => { const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const index = node.textContent!.indexOf('BSS'); if (index < 0) continue; const range = document.createRange(); range.setStart(node, index + 1); range.collapse(true); const box = range.getBoundingClientRect(); return { x: box.x + .2, y: box.y + box.height / 2 }; } throw new Error('Missing text'); });
     await page.mouse.click(point.x, point.y); expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(raw.indexOf('BSS') + 1);
@@ -946,10 +994,18 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
     const click = await page.evaluate(position => {
       const view = (window as any).__editor.active().view;
       const caret = view.coordsAtPos(position, 1);
-      return { x: caret.left + 1, y: (caret.top + caret.bottom) / 2 };
+      const marker = view.contentDOM.querySelectorAll('.md-list-number')[2].getBoundingClientRect();
+      return { x: caret.left + 1, y: (caret.top + caret.bottom) / 2, markerX: marker.left + 1, gapX: (marker.right + caret.left) / 2 };
     }, position);
-    await page.mouse.click(click.x, click.y);
     const head = () => page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head);
+    for (const x of [click.markerX, click.gapX, click.x]) {
+      await page.mouse.click(x, click.y);
+      expect(await head()).toBe(position);
+    }
+    await page.keyboard.press('ArrowLeft');
+    expect(await head()).toBe(raw.indexOf('\n1. vscode'));
+    await page.mouse.click(click.x + 15, click.y);
+    await page.keyboard.press('Home');
     expect(await head()).toBe(position);
     const cdp = await page.context().newCDPSession(page);
     const lefts = [];
@@ -979,6 +1035,23 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
     expect(await head()).toBe(position + '添加'.length);
     await page.keyboard.press('Control+z');
     expect(await content(page)).toBe(raw);
+
+    const nested = '1. 1. 嵌套正文\n\n结尾';
+    await setContent(page, nested);
+    await expect(editor.locator('.md-list-number')).toHaveText(['1.', '1.']);
+    await page.keyboard.press('Control+Home');
+    expect(await head()).toBe(nested.indexOf('嵌套'));
+    await cdp.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
+    await cdp.send('Input.insertText', { text: '拼' });
+    await expect.poll(savedContent).toBe('1. 1. 拼嵌套正文\n\n结尾');
+
+    await execute(page, 'toggle-source');
+    await page.keyboard.press('Control+Home');
+    expect(await head()).toBe(0);
+    await page.keyboard.press('Delete');
+    await page.keyboard.insertText('5');
+    expect(await content(page)).toBe('5. 1. 拼嵌套正文\n\n结尾');
+    await execute(page, 'toggle-source');
 
     const heading = '8. # <- 这个应该是一个显示 bug\n\n正文';
     await setContent(page, heading);

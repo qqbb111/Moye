@@ -11,7 +11,7 @@ import { icon, type IconName } from './icons';
 import logo from '../assets/moye.svg?url';
 import { APP_NAME, APP_SHORT_NAME, THEMES } from '../shared/branding';
 import { markdownStatistics, toggleMarkup, applyEdits } from '../shared/markdown-tools';
-import { MODERN_DARK } from '../shared/code-theme';
+import { CODE_THEME_OPTIONS, MODERN_DARK } from '../shared/code-theme';
 import { EditorView } from '@codemirror/view';
 import { undo, redo, isolateHistory } from '@codemirror/commands';
 import { MarkdownEditor, exportHTML, editorAction } from './editor';
@@ -29,7 +29,6 @@ app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NA
   <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="word-count" title="字数统计">0 字</button></footer></main></div>
   <div id="menu" role="menu" aria-label="编辑操作" hidden></div><div id="toast" role="status" hidden></div>
   <dialog id="save-conflict" aria-labelledby="save-conflict-title" aria-describedby="save-conflict-detail"><h2 id="save-conflict-title">磁盘文件已变更</h2><p id="save-conflict-detail">覆盖会替换磁盘上的版本。当前编辑已保留为草稿。</p><div class="dialog-buttons"><button value="cancel" autofocus>取消</button><button value="overwrite-conflict">覆盖磁盘文件</button><button value="save-as">另存为…</button></div></dialog>
-  <dialog id="rename-document" aria-labelledby="rename-title"><form><h2 id="rename-title">重命名</h2><input id="rename-name" aria-label="文件名" aria-describedby="rename-error" autocomplete="off" spellcheck="false" required maxlength="255"><p id="rename-error" role="alert" hidden></p><div class="dialog-buttons"><button type="button" data-rename-cancel>取消</button><button type="submit">重命名</button></div></form></dialog>
   <dialog id="quick-open" aria-label="快速打开" closedby="any"><div class="quick-search">${icon('search')}<input id="quick-input" placeholder="搜索文件名或路径" aria-label="快速打开文件名" role="combobox" aria-controls="quick-results" aria-expanded="true" aria-autocomplete="list" autocomplete="off"></div><div id="quick-results" role="listbox" aria-label="文件搜索结果"></div></dialog>
 `;
 
@@ -111,7 +110,7 @@ function applyState(next: WorkspaceView) {
   render();
   if (previousId !== workspace.activeId && doc) {
     const slot = slots.get(doc.id); if (previousId && slot) reveal(slot.element);
-    if (!document.querySelector('dialog[open]')) slot?.editor.focus();
+    if (!inlineRename && !document.querySelector('dialog[open]')) slot?.editor.focus();
   }
 }
 let dragX: number | null = null; let dragFrame = 0;
@@ -187,7 +186,7 @@ $('#tabbar').ondrop = event => {
   moveTab(moved, before);
 };
 function renderTabs() {
-  if (draggedTab) return;
+  if (draggedTab || holdInlineRename($('#tabs'))) return;
   const signature = JSON.stringify([workspace.activeId, workspace.documents.map(item => [item.id, item.title, item.path, item.dirty])]);
   if (signature === tabSignature) return; tabSignature = signature;
   $('#tabs').replaceChildren();
@@ -367,19 +366,29 @@ function fileRow(target: FileTarget, open: () => void, tooltip: string, glyph: I
   button.ondblclick = () => { const current = fileTarget(button); if (current) beginRename(current, button); };
   return button;
 }
-function updateFolder(next: FolderView) {
+function updateFolder(next: FolderView, showFiles = true) {
   if (folder?.path !== next.path) expandedFolders.clear();
   folderRefreshVersion++;
-  folder = next; library = 'files';
+  folder = next;
+  if (!showFiles) return;
+  library = 'files';
   $<HTMLInputElement>('#sidebar-filter').value = '';
   sidebarSignature = '';
   renderSidebar();
   $('#sidebar-content').scrollTop = 0;
 }
-async function goToParent(current: FolderView) {
+async function navigateFolder(current: FolderView, child?: string) {
+  const origin = document.activeElement;
   try {
-    const next = await bridge.openParentFolder(current.path);
-    if (next && folder?.path === current.path) updateFolder(next);
+    const next = await (child ? bridge.openChildFolder(current.path, child) : bridge.openParentFolder(current.path));
+    if (!next || folder?.path !== current.path) return;
+    const showFiles = library === 'files';
+    const restoreFocus = showFiles && origin && document.activeElement === origin && $('#sidebar-content').contains(origin);
+    updateFolder(next, showFiles);
+    if (restoreFocus) {
+      const entered = child ? undefined : [...document.querySelectorAll<HTMLElement>('.folder-enter')].find(button => button.dataset.folderPath === current.path);
+      (entered ?? document.querySelector<HTMLElement>('.folder-parent, #sidebar-content summary, #sidebar-content [data-file-row]') ?? $('#sidebar-open-folder')).focus({ preventScroll: true });
+    }
   } catch (error) { toast((error as Error).message); }
 }
 async function refreshFolder() {
@@ -394,7 +403,8 @@ async function refreshFolder() {
   }
 }
 function renderSidebar() {
-  if ($('#sidebar').hidden) return;
+  const container = $('#sidebar-content');
+  if (holdInlineRename(container) || $('#sidebar').hidden) return;
   const query = $<HTMLInputElement>('#sidebar-filter').value.trim().toLocaleLowerCase();
   const matches = (text: string) => text.toLocaleLowerCase().includes(query);
   const outline = library === 'outline' ? headings(activeDocument()?.content ?? '') : [];
@@ -410,7 +420,7 @@ function renderSidebar() {
   }
   sidebarSignature = signature;
   const empty = (text: string) => { const hint = document.createElement('p'); hint.className = 'sidebar-empty'; hint.textContent = text; return hint; };
-  const container = $('#sidebar-content'); container.replaceChildren();
+  container.replaceChildren();
   for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) { const active = button.dataset.library === library; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
   $('#sidebar-open-folder').hidden = library !== 'files';
   $<HTMLInputElement>('#sidebar-filter').placeholder = library === 'outline' ? '搜索大纲' : library === 'files' ? '搜索文件' : '搜索草稿';
@@ -424,7 +434,8 @@ function renderSidebar() {
     if (folder) {
       const current = folder;
       if (current.hasParent) {
-        const parent = row('..', () => void goToParent(current), '上一级文件夹', 'arrow-left');
+        const parent = row('..', () => void navigateFolder(current), '上一级文件夹', 'arrow-left');
+        parent.classList.add('folder-parent');
         parent.setAttribute('aria-label', '上一级文件夹');
         container.append(parent);
       }
@@ -450,8 +461,20 @@ function renderTree(container: HTMLElement, entries: FolderEntry[], depth: numbe
       container.append(button);
     }
     else {
-      const details = document.createElement('details'); const summary = document.createElement('summary'); summary.innerHTML = icon('chevron-right').replace('class="replica-icon"', 'class="replica-icon tree-chevron"') + icon('folder'); summary.append(document.createTextNode(entry.name)); summary.style.paddingLeft = `${18 + depth * 14}px`; const children = document.createElement('div'); details.append(summary, children);
-      details.addEventListener('toggle', () => { if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path); if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => { if (children.isConnected) renderTree(children, entries, depth + 1); }).catch(error => toast(error.message)); }); details.open = expandedFolders.has(entry.path); container.append(details);
+      const branch = document.createElement('div'); branch.className = 'folder-branch';
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.innerHTML = icon('chevron-right').replace('class="replica-icon"', 'class="replica-icon tree-chevron"') + icon('folder');
+      const label = document.createElement('span'); label.className = 'folder-label'; label.textContent = entry.name;
+      summary.append(label); summary.style.paddingLeft = `${18 + depth * 14}px`;
+      const children = document.createElement('div'); details.append(summary, children);
+      details.addEventListener('toggle', () => { if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path); if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => { if (children.isConnected) renderTree(children, entries, depth + 1); }).catch(error => toast(error.message)); });
+      details.open = expandedFolders.has(entry.path);
+      const enter = document.createElement('button'); enter.className = 'folder-enter'; enter.type = 'button';
+      enter.innerHTML = icon('arrow-right'); enter.dataset.folderPath = entry.path;
+      enter.title = `进入 ${entry.name}`; enter.setAttribute('aria-label', enter.title);
+      enter.onclick = () => { if (folder) void navigateFolder(folder, entry.path); };
+      branch.append(details, enter); container.append(branch);
     }
   }
 }
@@ -469,7 +492,7 @@ function hideMenu(restoreFocus = false) {
   }
 }
 let toolbarMenu: HTMLButtonElement | undefined;
-function addMenuItem(label: string, action: () => void, options: { disabled?: boolean; selected?: boolean; shortcut?: string; keepOpen?: boolean } = {}) {
+function addMenuItem(label: string, action: () => void, options: { disabled?: boolean; selected?: boolean; shortcut?: string; keepOpen?: boolean } = {}, group = $('#menu')) {
   const button = document.createElement('button');
   button.type = 'button'; button.role = options.selected === undefined ? 'menuitem' : 'menuitemradio'; button.tabIndex = -1;
   button.textContent = label; button.disabled = !!options.disabled;
@@ -480,7 +503,7 @@ function addMenuItem(label: string, action: () => void, options: { disabled?: bo
   if (options.shortcut) { const key = document.createElement('kbd'); key.textContent = options.shortcut; button.append(key); }
   button.onmousedown = event => event.preventDefault();
   button.onclick = () => { if (!options.keepOpen) hideMenu(true); action(); };
-  $('#menu').append(button);
+  group.append(button);
 }
 function separateMenu() { const separator = document.createElement('hr'); separator.role = 'separator'; $('#menu').append(separator); }
 function placeMenu(x: number, y: number, focus: boolean) {
@@ -519,6 +542,19 @@ function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = t
   if (section === '主题') {
     for (const [theme, label] of THEMES) {
       addMenuItem(label, () => void run(() => bridge.updatePreferences({ theme })), { selected: workspace.preferences.theme === theme });
+    }
+    separateMenu();
+    const codeGroup = document.createElement('div');
+    codeGroup.role = 'group';
+    codeGroup.setAttribute('aria-label', '代码配色');
+    const label = document.createElement('div');
+    label.className = 'menu-group-title';
+    label.setAttribute('aria-hidden', 'true');
+    label.textContent = '代码配色';
+    codeGroup.append(label);
+    menu.append(codeGroup);
+    for (const [codeTheme, label] of CODE_THEME_OPTIONS) {
+      addMenuItem(label, () => void run(() => bridge.updatePreferences({ codeTheme })), { selected: (workspace.preferences.codeTheme ?? 'github-dark') === codeTheme }, codeGroup);
     }
   } else {
     if (section !== trigger.dataset.toolbarMenu) {
@@ -589,54 +625,115 @@ async function saveFileTarget(target: FileTarget) {
     return result;
   });
 }
-const renameDialog = $<HTMLDialogElement>('#rename-document');
-const renameInput = $<HTMLInputElement>('#rename-name');
-const renameError = $('#rename-error');
-const renameSubmit = $<HTMLButtonElement>('#rename-document button[type="submit"]');
-const renameCancel = $<HTMLButtonElement>('[data-rename-cancel]');
-let renameTarget: FileTarget | undefined;
-let renameOrigin: HTMLElement | undefined;
-function beginRename(target: FileTarget, origin?: HTMLElement) {
-  if (document.querySelector('dialog[open]')) return;
+const fileExtension = /\.(?:md|markdown|mdown|mkd|txt)$/i;
+interface InlineRename {
+  target: FileTarget;
+  origin: HTMLElement;
+  control: HTMLElement;
+  container: HTMLElement;
+  stillVisible(): boolean;
+}
+let inlineRename: InlineRename | undefined;
+
+function removeInlineRename(session: InlineRename) {
+  inlineRename = undefined;
+  session.control.replaceWith(session.origin);
+}
+function holdInlineRename(container: HTMLElement) {
+  const session = inlineRename;
+  if (session?.container !== container) return false;
+  if (session.stillVisible()) return true;
+  removeInlineRename(session);
+  return false;
+}
+function focusRenamedRow(container: HTMLElement, matches: (row: HTMLElement) => boolean) {
+  const find = () => [...container.querySelectorAll<HTMLElement>('[data-file-row]')].find(matches);
+  const row = find();
+  if (row) { row.focus(); return; }
+  // Expanded branches repopulate asynchronously after a folder refresh.
+  const observer = new MutationObserver(() => {
+    const row = find();
+    if (row) { stop(); row.focus(); }
+  });
+  const stop = () => { observer.disconnect(); clearTimeout(timeout); document.removeEventListener('focusin', stop); };
+  const timeout = setTimeout(() => { stop(); activeEditor()?.focus(); }, 800);
+  observer.observe(container, { childList: true, subtree: true });
+  document.addEventListener('focusin', stop, { once: true });
+}
+function endInlineRename(session: InlineRename, focus: boolean, newName?: string) {
+  if (inlineRename !== session) return;
+  const { target, origin, container } = session;
+  const tab = container.id === 'tabs';
+  const previous = fileRows.get(origin);
+  removeInlineRename(session);
+  if (tab) renderTabs();
+  else renderSidebar();
+  if (!focus) return;
+  if (origin.isConnected) { origin.focus({ preventScroll: true }); return; }
+  if (tab) {
+    const anchor = document.getElementById(origin.id);
+    if (anchor) anchor.focus({ preventScroll: true });
+    else activeEditor()?.focus();
+  } else if (previous && 'id' in previous.reference) {
+    const { id } = previous.reference;
+    focusRenamedRow(container, row => {
+      const reference = fileRows.get(row)?.reference;
+      return !!reference && 'id' in reference && reference.id === id;
+    });
+  } else if (target.path) {
+    const previousPath = fileKey(target.path)!;
+    const suffix = fileExtension.exec(target.title)?.[0] ?? '';
+    const filename = newName && !fileExtension.test(newName) ? newName + suffix : newName ?? target.title;
+    const path = previousPath.slice(0, previousPath.lastIndexOf('/') + 1) + filename.toLowerCase();
+    focusRenamedRow(container, row => fileKey(fileRows.get(row)?.path ?? null) === path);
+  } else activeEditor()?.focus();
+}
+function beginRename(target: FileTarget, origin: HTMLElement) {
+  if (inlineRename || !origin.isConnected || origin.closest('[hidden]') || document.querySelector('dialog[open]')) return;
   cancelRowActivation();
   flushAll();
-  renameTarget = target; renameOrigin = origin;
-  renameError.hidden = true; renameInput.removeAttribute('aria-invalid');
-  renameInput.value = target.title;
-  renameDialog.showModal(); reveal(renameDialog, 4);
-  renameInput.focus();
-  const extension = target.path ? /\.(?:md|markdown|mdown|mkd|txt)$/i.exec(target.title) : null;
-  renameInput.setSelectionRange(0, extension?.index ?? target.title.length);
+  const control = document.createElement('div');
+  control.className = origin.className + ' inline-rename';
+  const tab = origin.classList.contains('tab');
+  if (tab) control.style.width = `${origin.getBoundingClientRect().width}px`;
+  else control.style.paddingLeft = origin.style.paddingLeft;
+  const glyph = origin.querySelector('.replica-icon');
+  if (glyph) control.append(glyph.cloneNode(true));
+  const input = document.createElement('input');
+  input.className = 'inline-rename-input'; input.setAttribute('aria-label', '文件名');
+  input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 255; input.value = target.title;
+  control.append(input);
+  const activeLibrary = library, folderPath = folder?.path;
+  const session: InlineRename = {
+    target, origin, control, container: tab ? $('#tabs') : $('#sidebar-content'),
+    stillVisible: () => tab ? !$('#tabbar').hidden && workspace.activeId === origin.dataset.id : !$('#sidebar').inert && library === activeLibrary && folder?.path === folderPath,
+  };
+  inlineRename = session;
+  origin.replaceWith(control);
+  input.onblur = () => { if (!input.readOnly) endInlineRename(session, false); };
+  input.oninput = () => { input.removeAttribute('aria-invalid'); input.removeAttribute('aria-describedby'); };
+  input.onkeydown = async event => {
+    if (event.isComposing || event.keyCode === 229 || !['Enter', 'Escape'].includes(event.key)) return;
+    event.preventDefault(); event.stopPropagation();
+    if (input.readOnly) return;
+    const name = input.value.trim();
+    if (event.key === 'Escape' || name === target.title) { endInlineRename(session, true); return; }
+    input.readOnly = true;
+    try {
+      const result = await bridge.renameDocument(target.reference, name);
+      if (!result.ok) throw new Error(result.message ?? '重命名失败');
+      await refreshFolder();
+      endInlineRename(session, document.activeElement === input, name);
+    } catch (error) {
+      toast((error as Error).message);
+      if (document.activeElement !== input) endInlineRename(session, false);
+      else { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', 'toast'); }
+    } finally { input.readOnly = false; }
+  };
+  input.focus();
+  const extension = target.path ? fileExtension.exec(target.title) : null;
+  input.setSelectionRange(0, extension?.index ?? target.title.length);
 }
-renameCancel.onclick = () => renameDialog.close();
-renameDialog.oncancel = event => { if (renameSubmit.disabled) event.preventDefault(); };
-renameDialog.onclose = () => {
-  if (renameOrigin?.isConnected) renameOrigin.focus({ preventScroll: true });
-  else activeEditor()?.focus();
-  renameTarget = undefined; renameOrigin = undefined;
-};
-renameInput.oninput = () => { renameError.hidden = true; renameInput.removeAttribute('aria-invalid'); };
-$<HTMLFormElement>('#rename-document form').onsubmit = async event => {
-  event.preventDefault();
-  if (!renameTarget || renameSubmit.disabled) return;
-  const name = renameInput.value.trim();
-  if (name === renameTarget.title) { renameDialog.close(); return; }
-  renameSubmit.disabled = renameCancel.disabled = true;
-  renameInput.readOnly = true;
-  try {
-    const result = await bridge.renameDocument(renameTarget.reference, name);
-    if (!result.ok) throw new Error(result.message ?? '重命名失败');
-    renameDialog.close();
-    void refreshFolder();
-  } catch (error) {
-    renameError.textContent = (error as Error).message;
-    renameError.hidden = false; renameInput.setAttribute('aria-invalid', 'true');
-    renameInput.focus();
-  } finally {
-    renameSubmit.disabled = renameCancel.disabled = false;
-    renameInput.readOnly = false;
-  }
-};
 async function saveDocument(id: string, mode: SaveMode) {
   const refresh = mode === 'save-as' || !workspace.documents.find(doc => doc.id === id)?.path;
   await run(async () => {
@@ -700,11 +797,18 @@ async function execute(action: string, value?: string) {
   if (action === 'new') return run(() => bridge.newDocument()); if (action === 'open') return run(() => bridge.openDocuments());
   if (action === 'save' || action === 'save-as') { if (doc) return saveDocument(doc.id, action); return; }
   if (action === 'rename') {
-    const focused = document.activeElement as HTMLElement;
-    const file = focused.closest<HTMLElement>('[data-file-row]');
-    const tab = focused.closest<HTMLElement>('.tab');
-    const target = file ? fileTarget(file) : doc && (!tab || tab.dataset.id === doc.id) ? documentTarget(doc) : undefined;
-    if (target) beginRename(target, file ?? tab ?? undefined);
+    const file = document.activeElement?.closest<HTMLElement>('[data-file-row]');
+    if (file) {
+      const target = fileTarget(file);
+      if (target) beginRename(target, file);
+    } else if (doc) {
+      const focusedTab = document.activeElement?.closest<HTMLElement>('.tab');
+      if (focusedTab && focusedTab.dataset.id !== doc.id) return;
+      const tab = document.getElementById(`document-tab-${doc.id}`);
+      const visibleRow = $('#sidebar').inert ? undefined : document.querySelector<HTMLElement>('[data-file-row][aria-current="page"]');
+      const anchor = tab && !$('#tabbar').hidden ? tab : visibleRow;
+      if (anchor) beginRename(documentTarget(doc), anchor);
+    }
     return;
   }
   if (action === 'close-tab') { if (doc) return run(() => bridge.closeDocument(doc.id)); return; }
@@ -805,6 +909,7 @@ document.addEventListener('keydown', event => {
   if (!workspace) return;
   if (document.querySelector('dialog[open]')) return;
   const target = document.activeElement as HTMLElement | null;
+  if (target?.matches('.inline-rename-input')) return;
   const menu = $('#menu');
   if (!menu.hidden) {
     if (event.key === 'Tab') { hideMenu(true); return; }

@@ -287,6 +287,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 #menu button:not(:disabled):is(:hover, :focus-visible) { background: var(--ui-accent-soft); }
 #menu button:focus-visible { outline-offset: -1px; }
 #menu button:disabled:hover { background: transparent; cursor: default; }
+#menu .menu-group-title { padding: 4px 10px 2px; color: var(--muted); font-size: 11px; }
 #save-conflict h2 { margin-bottom: 10px; }
 #save-conflict p { margin: 0; color: var(--fg); font-size: 13px; }
 #save-conflict .dialog-buttons { margin-top: 20px; }
@@ -323,14 +324,26 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 #sidebar-open-folder { flex: none; border-radius: 0; }
 .sidebar-row.pending-activation { background: var(--ui-accent-soft); color: var(--ui-accent); }
 .folder-heading { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-#rename-document h2 { margin-bottom: 14px; }
-#rename-name {
-  width: 100%; height: 38px; padding: 0 11px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+.folder-branch { position: relative; }
+.folder-branch > details > summary { min-height: 34px; padding-right: 34px; }
+.folder-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-enter {
+  position: absolute; top: 4px; right: 3px; width: 27px; height: 26px;
+  display: inline-grid; place-items: center; padding: 0; border-radius: 4px; color: var(--muted);
 }
-#rename-error { margin: 8px 0 0; color: var(--error, #bc5450); }
-#rename-document button[type="submit"] { background: var(--ui-accent-soft); color: var(--ui-accent); border-color: transparent; }
-#rename-document button[type="submit"]:not(:disabled):hover { border-color: var(--ui-accent); }
+.folder-enter:is(:hover, :focus-visible) { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.folder-enter:focus-visible { outline-offset: -1px; }
+.folder-enter > .replica-icon { width: 14px; height: 14px; }
+.sidebar-row.inline-rename { padding-block: 4px; }
+.inline-rename { cursor: default; }
+.inline-rename-input {
+  width: 0; min-width: 0; flex: 1 1 0; height: 24px;
+  margin-inline-start: -3px; padding: 0 4px; border: 1px solid var(--ui-accent); border-radius: 4px;
+  color: var(--fg); background: var(--bg); caret-color: var(--fg);
+}
+#app .inline-rename-input:focus-visible { outline: none; }
+#app .inline-rename-input[aria-invalid='true'] { border-color: #a94b42; }
+:root:not([data-theme='light']) #app .inline-rename-input[aria-invalid='true'] { border-color: #eca29a; }
 .sidebar-heading { min-height: 44px; padding: 14px 18px 6px; }
 #quick-open { padding: 10px; border-radius: 10px; }
 .quick-search { display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 1px solid var(--ui-accent); border-radius: var(--ui-radius); background: var(--surface); }

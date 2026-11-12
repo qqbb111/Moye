@@ -66,6 +66,7 @@ export interface RypotaBridge {
   openExternal(url: string): Promise<ActionResult>;
   openFolder(): Promise<FolderView | null>;
   openParentFolder(path: string): Promise<FolderView | null>;
+  openChildFolder(current: string, path: string): Promise<FolderView | null>;
   listFolder(path: string): Promise<FolderEntry[]>;
   openFolderFile(path: string): Promise<ActionResult>;
   insertImage(id: string, data?: { bytes: number[]; name: string }): Promise<{ url?: string; message?: string }>;

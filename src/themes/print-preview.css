@@ -13,3 +13,4 @@
 #print-preview #print-save { height: var(--ui-control-height); padding: 0 12px; }
 #print-preview .print-toolbar select { height: 28px; }
 #print-page-count:empty { display: none; }
+.print-page canvas[data-previous] { position: absolute; inset: 0; pointer-events: none; }

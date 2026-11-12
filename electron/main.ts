@@ -265,6 +265,14 @@ function registerIpc() {
     const parent = path.dirname(root);
     return parent === root ? null : selectFolder(id, parent, beginFolderNavigation(id));
   });
+  ipcMain.handle('folder:child', async (event, current: string, child: string) => {
+    const id = windowIdOf(event), root = folders.get(id);
+    if (!root || root !== current) return null;
+    const navigation = beginFolderNavigation(id);
+    const directory = await checkFolder(id, child);
+    if (directory === root || !(await fs.stat(directory)).isDirectory()) throw new Error('请选择子文件夹');
+    return selectFolder(id, directory, navigation);
+  });
   ipcMain.handle('folder:list', async (event, directory: string) => folderEntries(await checkFolder(windowIdOf(event), directory)));
   handle('folder:file', async (id, file: string) => openFile(id, await checkFolderFile(id, file)));
   handle('document:rename', async (windowId, reference: DocumentReference, name: string) => {

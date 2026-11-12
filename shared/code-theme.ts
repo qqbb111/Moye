@@ -41,6 +41,11 @@ export const BUILTIN_CODE_THEMES = {
   'modern-dark': MODERN_DARK,
 } as const;
 export type CodeThemePreference = keyof typeof BUILTIN_CODE_THEMES | 'vscode';
+export const CODE_THEME_OPTIONS: ReadonlyArray<readonly [CodeThemePreference, string]> = [
+  ...(Object.keys(BUILTIN_CODE_THEMES) as Array<keyof typeof BUILTIN_CODE_THEMES>)
+    .map(value => [value, BUILTIN_CODE_THEMES[value].name] as const),
+  ['vscode', '跟随本机 VS Code'],
+];
 
 export function isCodeThemePreference(value: unknown): value is CodeThemePreference {
   return typeof value === 'string' && (value === 'vscode' || Object.hasOwn(BUILTIN_CODE_THEMES, value));

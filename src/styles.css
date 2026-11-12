@@ -12,8 +12,5 @@
 .md-quote-marker{color:var(--muted);font-weight:400}
 .md-heading .md-heading-marker,.md-heading .md-heading-marker *{color:var(--muted);font-weight:400}
 
-.md-list-number{display:inline-block;position:relative;width:var(--list-marker-width);white-space:pre;color:transparent;text-indent:0;font-variant-numeric:tabular-nums}
-.md-list-number::after{content:attr(data-list-marker);position:absolute;left:0;top:0;color:var(--fg);pointer-events:none}
+.md-list-number{display:inline-block;width:var(--list-marker-width);margin-inline-end:.25em;white-space:nowrap;color:var(--fg);text-indent:0;font-variant-numeric:tabular-nums}
 .md-ordered-hanging{--list-hanging-indent:calc(var(--list-marker-width) + .25em);padding-left:calc(22px + var(--list-hanging-indent))!important;text-indent:calc(-1 * var(--list-hanging-indent))}
-
-.md-list-number,.md-list-number *{color:transparent!important}

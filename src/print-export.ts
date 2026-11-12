@@ -8,7 +8,7 @@ import italic from '../assets/fonts/SourceCodePro-It.woff2?inline';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 
-export async function printHTML(source: string, title: string, host: Host, options: PrintOptions, signal?: AbortSignal): Promise<string> {
+export async function printHTML(source: string, title: string, host: Host, options: PrintOptions, signal?: AbortSignal, provisional = false): Promise<string> {
   const article = document.createElement('article'); article.className = options.layout === 'portrait' ? 'single' : 'columns';
   const render = async (node: MarkdownNode): Promise<Node> => {
     signal?.throwIfAborted();
@@ -32,7 +32,10 @@ export async function printHTML(source: string, title: string, host: Host, optio
         try { const { default: mermaid } = await import('mermaid'); mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: options.color === 'mono' ? 'neutral' : 'default', htmlLabels: false }); const result = await mermaid.render(`print-${crypto.randomUUID()}`, node.value ?? ''); const diagram = document.createElement('div'); diagram.className = 'print-diagram'; diagram.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } }); return diagram; } catch { /* Incomplete diagrams remain readable code. */ }
       }
       const value = node.value ?? '', pre = document.createElement('pre'); pre.className = `print-code ${options.lineNumbers ? 'numbered' : ''}`;
-      const tokens = await tokenizeGithub(value, node.lang ?? '', options.color === 'mono' ? 'moye-print-mono' : 'github-light');
+      // The temporary monochrome pages can skip comment coloring. This keeps
+      // their typesetting and line breaks while the final export loads Shiki.
+      const tokens = provisional && options.color === 'mono' ? null
+        : await tokenizeGithub(value, node.lang ?? '', options.color === 'mono' ? 'moye-print-mono' : 'github-light');
       signal?.throwIfAborted();
       const lines = value.split('\n'); const body = document.createElement('code');
       const rows = lines.map((text, index) => {
