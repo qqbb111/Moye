@@ -90,6 +90,36 @@ test('关闭未命名标签保留草稿，恢复时仍然包含完整内容', as
   const { store, windowId } = await setup();
   try { const id = store.newDocument(windowId); store.update(windowId, id, '未保存的灵感', 1); await store.closeDocument(windowId, id); assert.equal(store.view(windowId).documents.length, 0); assert.equal(store.view(windowId).drafts[0].content, '未保存的灵感'); store.restore(windowId, id); assert.equal(store.view(windowId).documents[0].content, '未保存的灵感'); } finally { store.dispose(); }
 });
+test('磁盘重命名与保存串行，保留 UTF-8 格式、草稿、最近文件和相对图片链接', async () => {
+  const { directory, store, windowId } = await setup();
+  const original = path.join(directory, '原文.markdown');
+  const renamed = path.join(directory, '新文件.markdown');
+  const content = '# 修改\n\n![附件](原文.assets/picture.png)\n';
+  await fs.writeFile(original, '\uFEFF# 原文\r\n');
+  try {
+    store.setPreferences({ autoSave: false });
+    const { id } = await store.openFile(windowId, original);
+    store.update(windowId, id, content, 1);
+    await Promise.all([store.save(id), store.renameDocument(windowId, id, '新文件')]);
+    const document = store.view(windowId).documents[0];
+    assert.equal(document.path, renamed);
+    assert.equal(document.content, content);
+    assert.equal(store.recent[0], renamed);
+    assert.equal(await fs.readFile(renamed, 'utf8'), '\uFEFF' + content.replaceAll('\n', '\r\n'));
+    await assert.rejects(fs.access(original), { code: 'ENOENT' });
+
+    const draft = store.newDocument(windowId, '草稿正文');
+    await store.closeDocument(windowId, draft);
+    await store.renameDocument(windowId, draft, '草稿新名');
+    await store.flush();
+    const restored = new DocumentStore(store.directory);
+    await restored.initialize();
+    try {
+      assert.equal(restored.view(windowId).drafts[0].title, '草稿新名');
+      assert.equal(restored.view(windowId).drafts[0].content, '草稿正文');
+    } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
 test('自动保存写回 UTF-8 文件并保留 BOM 和 CRLF，同时保存原文件备份', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '中文.md'); await fs.writeFile(file, '\uFEFF# 原文\r\n\r\n正文\r\n');
   try { const { id } = await store.openFile(windowId, file); store.update(windowId, id, '# 新标题\n\n自动保存正文\n', 1); await delay(180); assert.equal(await fs.readFile(file, 'utf8'), '\uFEFF# 新标题\r\n\r\n自动保存正文\r\n'); assert.equal(store.view(windowId).documents[0].dirty, false); assert.equal(await fs.readFile(path.join(store.directory, 'backups', `${id}.md`), 'utf8'), '\uFEFF# 原文\r\n\r\n正文\r\n'); } finally { store.dispose(); }

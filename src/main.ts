@@ -19,16 +19,17 @@ import { Settings } from './settings';
 import { COMMANDS, commandKeys, shortcutFromEvent } from '../shared/commands';
 import { selectLine } from '@codemirror/commands';
 import { headings } from './markdown';
-import type { WorkspaceView, DocumentView, ActionResult, FolderEntry, SaveMode } from '../shared/types';
+import type { WorkspaceView, DocumentView, ActionResult, FolderEntry, FolderView, DocumentReference, SaveMode } from '../shared/types';
 
 const bridge = window.rypota;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const app = $('#app');
-app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作">${['文件', '编辑', '主题', '导出'].map(label => `<button type="button" data-toolbar-menu="${label}" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">${label}</button>`).join('')}<button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
-  <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-heading"><strong id="folder-name">文档</strong></div><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><label class="sidebar-filter">${icon('search')}<input id="sidebar-filter" type="search" aria-label="筛选侧栏" placeholder="筛选当前列表…" autocomplete="off"></label><div id="sidebar-content"></div></aside><div id="sidebar-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="256" tabindex="0" hidden></div>
+app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作">${['文件', '编辑', '主题'].map(label => `<button type="button" data-toolbar-menu="${label}" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">${label}</button>`).join('')}<button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
+  <div class="workspace"><aside id="sidebar" hidden><div class="sidebar-tabs"><button data-library="outline" class="active">${icon('list-tree')}大纲</button><button data-library="files">${icon('files')}文件</button><button data-library="drafts">${icon('history')}草稿</button></div><label class="sidebar-filter">${icon('search')}<input id="sidebar-filter" type="search" aria-label="筛选侧栏" placeholder="筛选当前列表…" autocomplete="off"></label><div id="sidebar-content"></div><button id="sidebar-open-folder" class="sidebar-bottom" hidden>${icon('folder-opened')}打开文件夹…</button></aside><div id="sidebar-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="420" aria-valuenow="256" tabindex="0" hidden></div>
   <main><div id="tabbar" hidden><div id="tabs" role="tablist" aria-label="打开的文档"></div><button id="add-tab" aria-label="新建标签页" title="新建标签页">${icon('add')}</button></div><div id="editor-stage"></div><div id="empty" hidden><button id="new-empty">${icon('new-file')}新建文档</button><button id="open-empty">${icon('folder-opened')}打开文件…</button></div><footer><button id="toggle-sidebar" aria-label="切换侧栏" title="切换侧栏 Ctrl+Shift+L">${icon('layout-sidebar-left')}</button><button id="source-mode" aria-label="源码模式" title="源码模式 Ctrl+/">${icon('code')}</button><span id="save-status" role="status"></span><span class="footer-space"></span><button id="word-count" title="字数统计">0 字</button></footer></main></div>
   <div id="menu" role="menu" aria-label="编辑操作" hidden></div><div id="toast" role="status" hidden></div>
   <dialog id="save-conflict" aria-labelledby="save-conflict-title" aria-describedby="save-conflict-detail"><h2 id="save-conflict-title">磁盘文件已变更</h2><p id="save-conflict-detail">覆盖会替换磁盘上的版本。当前编辑已保留为草稿。</p><div class="dialog-buttons"><button value="cancel" autofocus>取消</button><button value="overwrite-conflict">覆盖磁盘文件</button><button value="save-as">另存为…</button></div></dialog>
+  <dialog id="rename-document" aria-labelledby="rename-title"><form><h2 id="rename-title">重命名</h2><input id="rename-name" aria-label="文件名" aria-describedby="rename-error" autocomplete="off" spellcheck="false" required maxlength="255"><p id="rename-error" role="alert" hidden></p><div class="dialog-buttons"><button type="button" data-rename-cancel>取消</button><button type="submit">重命名</button></div></form></dialog>
   <dialog id="quick-open" aria-label="快速打开" closedby="any"><div class="quick-search">${icon('search')}<input id="quick-input" placeholder="搜索文件名或路径" aria-label="快速打开文件名" role="combobox" aria-controls="quick-results" aria-expanded="true" aria-autocomplete="list" autocomplete="off"></div><div id="quick-results" role="listbox" aria-label="文件搜索结果"></div></dialog>
 `;
 
@@ -45,7 +46,7 @@ function closeSaveConflict(value: string) {
 for (const button of saveConflict.querySelectorAll('button')) button.onclick = () => closeSaveConflict(button.value);
 saveConflict.addEventListener('cancel', event => { event.preventDefault(); closeSaveConflict('cancel'); });
 let printPreview: import('./print-preview').PrintPreview | undefined;
-let library = 'outline'; let folder: { path: string; entries: FolderEntry[] } | null = null;
+let library = 'outline'; let folder: FolderView | null = null;
 const slots = new Map<string, { element: HTMLElement; editor: MarkdownEditor; applying: boolean }>();
 const pendingImages = new Set<Promise<void>>();
 let toastTimer: ReturnType<typeof setTimeout>; let renderPending = false;
@@ -54,7 +55,7 @@ let tabSignature = ''; let draggedTab: string | null = null;
 let measuredAppearance = '';
 let sidebarSignature = ''; let resizingSidebar = false; let quickSelection = 0;
 const expandedFolders = new Set<string>();
-const nameOf = (file: string) => file.split(/[\\/]/).pop() ?? file;
+const nameOf = (file: string) => file.split(/[\\/]/).filter(Boolean).at(-1) ?? file;
 const activeDocument = () => workspace?.documents.find(doc => doc.id === workspace.activeId);
 const activeEditor = () => slots.get(workspace?.activeId ?? '')?.editor;
 function toast(message: string) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4000); }
@@ -194,7 +195,16 @@ function renderTabs() {
     const tab = document.createElement('div'); tab.className = `tab ${item.id === workspace.activeId ? 'active' : ''}`; tab.role = 'tab'; tab.dataset.id = item.id; tab.id = `document-tab-${item.id}`; tab.setAttribute('aria-controls', `document-panel-${item.id}`); tab.setAttribute('aria-label', item.title); tab.setAttribute('aria-selected', String(item.id === workspace.activeId)); tab.tabIndex = item.id === workspace.activeId ? 0 : -1; tab.title = item.path ?? '本地草稿'; tab.draggable = false;
     const label = document.createElement('span'); label.className = 'tab-label'; label.textContent = item.title + (item.dirty && item.path ? ' ●' : ''); const close = document.createElement('button'); close.className = 'tab-close'; close.tabIndex = item.id === workspace.activeId ? 0 : -1; close.innerHTML = icon('close'); close.draggable = false; close.title = `关闭 ${item.title}`; close.setAttribute('aria-label', `关闭 ${item.title}`); close.onclick = event => { event.stopPropagation(); flushAll(); void run(() => bridge.closeDocument(item.id)); };
     let skipClick = false;
-    tab.innerHTML = icon('markdown').replace('class="replica-icon"', 'class="replica-icon tab-file-icon"'); tab.append(label, close); tab.onclick = () => { if (skipClick) { skipClick = false; return; } flushAll(); void run(async () => { const result = await bridge.activateDocument(item.id); activeEditor()?.focus(); return result; }); }; tab.onkeydown = event => {
+    tab.innerHTML = icon('markdown').replace('class="replica-icon"', 'class="replica-icon tab-file-icon"'); tab.append(label, close);
+    tab.onclick = () => {
+      if (skipClick) { skipClick = false; return; }
+      if (workspace.activeId === item.id) { activeEditor()?.focus(); return; }
+      flushAll(); void run(async () => { const result = await bridge.activateDocument(item.id); activeEditor()?.focus(); return result; });
+    };
+    tab.ondblclick = event => {
+      if (workspace.activeId === item.id && !(event.target as Element).closest('.tab-close')) beginRename(documentTarget(item), tab);
+    };
+    tab.onkeydown = event => {
       if (event.target !== tab) return;
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); tab.click(); }
       else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -312,41 +322,133 @@ function render() {
   if (appearance !== measuredAppearance) { measuredAppearance = appearance; for (const slot of slots.values()) slot.editor.view.requestMeasure(); }
 }
 function row(label: string, action: () => void, title = '', glyph?: IconName) { const element = document.createElement('button'); element.className = 'sidebar-row'; if (glyph) { element.classList.add('has-icon'); element.innerHTML = icon(glyph); const text = document.createElement('span'); text.className = 'row-label'; text.textContent = label; element.append(text); } else element.textContent = label; element.title = title; element.onclick = action; return element; }
+type FileTarget = { reference: DocumentReference; title: string; path: string | null };
+const documentTarget = ({ id, title, path }: DocumentView): FileTarget => ({ reference: { id }, title, path });
+const fileKey = (path: string | null) => path?.replaceAll('\\', '/').toLowerCase();
+const fileRows = new WeakMap<HTMLElement, FileTarget>();
+let pendingFileRow: HTMLElement | undefined;
+let rowOpenTimer: ReturnType<typeof setTimeout> | undefined;
+let sidebarSelectionKey = '';
+let folderRefreshVersion = 0;
+function cancelRowActivation() {
+  clearTimeout(rowOpenTimer); rowOpenTimer = undefined;
+  pendingFileRow?.classList.remove('pending-activation'); pendingFileRow = undefined;
+}
+function fileTarget(button: HTMLElement) {
+  const target = fileRows.get(button);
+  if (!target || 'id' in target.reference) return target;
+  const key = fileKey(target.path);
+  const document = [...workspace.documents, ...workspace.drafts].find(doc => fileKey(doc.path) === key);
+  return document ? documentTarget(document) : target;
+}
+function paintFileSelection(button: HTMLElement) {
+  const document = activeDocument();
+  const target = fileRows.get(button);
+  const active = !!document && !!target && ('id' in target.reference ? document.id === target.reference.id : fileKey(document.path) === fileKey(target.path));
+  button.classList.toggle('selected', active);
+  if (active) button.setAttribute('aria-current', 'page');
+  else button.removeAttribute('aria-current');
+}
+function fileRow(target: FileTarget, open: () => void, tooltip: string, glyph: IconName, deferred = false) {
+  const button = row(target.title, open, tooltip, glyph);
+  button.dataset.fileRow = '';
+  fileRows.set(button, target);
+  paintFileSelection(button);
+  button.onclick = event => {
+    cancelRowActivation();
+    if (event.detail === 0 || event.detail === 1 && !deferred) open();
+    // A restored draft disappears from this list. Keep it available through a
+    // double-click while immediately indicating the first click.
+    else if (event.detail === 1) {
+      pendingFileRow = button; button.classList.add('pending-activation');
+      rowOpenTimer = setTimeout(() => { cancelRowActivation(); if (button.isConnected) open(); }, 525);
+    }
+  };
+  button.ondblclick = () => { const current = fileTarget(button); if (current) beginRename(current, button); };
+  return button;
+}
+function updateFolder(next: FolderView) {
+  if (folder?.path !== next.path) expandedFolders.clear();
+  folderRefreshVersion++;
+  folder = next; library = 'files';
+  $<HTMLInputElement>('#sidebar-filter').value = '';
+  sidebarSignature = '';
+  renderSidebar();
+  $('#sidebar-content').scrollTop = 0;
+}
+async function goToParent(current: FolderView) {
+  try {
+    const next = await bridge.openParentFolder(current.path);
+    if (next && folder?.path === current.path) updateFolder(next);
+  } catch (error) { toast((error as Error).message); }
+}
+async function refreshFolder() {
+  const current = folder;
+  if (!current) return;
+  const version = ++folderRefreshVersion;
+  try {
+    const entries = await bridge.listFolder(current.path);
+    if (folder?.path === current.path && version === folderRefreshVersion) { folder = { ...current, entries }; sidebarSignature = ''; renderSidebar(); }
+  } catch (error) {
+    if (folder?.path === current.path && version === folderRefreshVersion) toast((error as Error).message);
+  }
+}
 function renderSidebar() {
   if ($('#sidebar').hidden) return;
   const query = $<HTMLInputElement>('#sidebar-filter').value.trim().toLocaleLowerCase();
   const matches = (text: string) => text.toLocaleLowerCase().includes(query);
   const outline = library === 'outline' ? headings(activeDocument()?.content ?? '') : [];
-  const signature = JSON.stringify([library, query, workspace.activeId, outline, workspace.documents.map(d => [d.id, d.title, d.path]), workspace.drafts.map(d => [d.id, d.title]), workspace.recent, folder?.path, folder?.entries]);
-  if (signature === sidebarSignature) return; sidebarSignature = signature;
+  const entries = library === 'outline' ? [workspace.activeId, outline] : library === 'drafts' ? workspace.drafts.map(d => [d.id, d.title, d.path]) : folder ?? workspace.documents.map(d => [d.id, d.title, d.path]);
+  const signature = JSON.stringify([library, query, entries]);
+  const selected = activeDocument();
+  const selectionKey = JSON.stringify([selected?.id, selected?.path]);
+  const selectionChanged = selectionKey !== sidebarSelectionKey;
+  sidebarSelectionKey = selectionKey;
+  if (signature === sidebarSignature) {
+    if (library === 'files' && selectionChanged) $('#sidebar-content').querySelectorAll<HTMLElement>('[data-file-row]').forEach(paintFileSelection);
+    return;
+  }
+  sidebarSignature = signature;
   const empty = (text: string) => { const hint = document.createElement('p'); hint.className = 'sidebar-empty'; hint.textContent = text; return hint; };
   const container = $('#sidebar-content'); container.replaceChildren();
   for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) { const active = button.dataset.library === library; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
-  $('#sidebar .sidebar-heading').hidden = library !== 'files' || !folder;
+  $('#sidebar-open-folder').hidden = library !== 'files';
   $<HTMLInputElement>('#sidebar-filter').placeholder = library === 'outline' ? '搜索大纲' : library === 'files' ? '搜索文件' : '搜索草稿';
-  $('#folder-name').textContent = library === 'files' && folder ? nameOf(folder.path) : library === 'outline' ? activeDocument()?.title ?? '文档大纲' : library === 'drafts' ? '本机草稿' : '文档';
-  $('#folder-name').title = library === 'outline' ? activeDocument()?.path ?? '本机草稿' : library === 'files' ? folder?.path ?? '' : '';
   if (library === 'outline') {
     const doc = activeDocument(); if (!doc) return; for (const heading of outline.filter(heading => matches(heading.text))) { const element = row(heading.text, () => { const editor = activeEditor()!; editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); }); element.style.paddingLeft = `${18 + (heading.level - 1) * 12}px`; element.dataset.level = String(heading.level); container.append(element); }
     if (!container.childElementCount) container.append(empty(query ? '没有匹配的标题' : '尚无标题'));
   } else if (library === 'drafts') {
-    for (const doc of workspace.drafts.filter(doc => matches(doc.title))) container.append(row(doc.title, () => void run(() => bridge.restoreDraft(doc.id)), '恢复草稿', 'history'));
+    for (const doc of workspace.drafts.filter(doc => matches(doc.title))) container.append(fileRow(documentTarget(doc), () => void run(() => bridge.restoreDraft(doc.id)), '恢复草稿', 'history', true));
     if (!container.childElementCount) container.append(empty(query ? '没有匹配的草稿' : '暂无草稿'));
   } else {
-    if (folder) renderTree(container, query ? folder.entries.filter(entry => !entry.directory && matches(entry.name)) : folder.entries, 0);
-    else {
+    if (folder) {
+      const current = folder;
+      if (current.hasParent) {
+        const parent = row('..', () => void goToParent(current), '上一级文件夹', 'arrow-left');
+        parent.setAttribute('aria-label', '上一级文件夹');
+        container.append(parent);
+      }
+      const heading = document.createElement('div'); heading.className = 'sidebar-section folder-heading';
+      heading.textContent = nameOf(current.path); heading.title = current.path; container.append(heading);
+      const entries = query ? current.entries.filter(entry => !entry.directory && matches(entry.name)) : current.entries;
+      renderTree(container, entries, 0);
+      if (query && !entries.length) container.append(empty('没有匹配的文件'));
+    } else {
       for (const doc of workspace.documents.filter(doc => matches(doc.title + ' ' + (doc.path ?? '')))) {
-        const element = row(doc.title, () => { flushAll(); void run(() => bridge.activateDocument(doc.id)); }, doc.path ?? '本机草稿', 'markdown'); element.classList.toggle('selected', doc.id === workspace.activeId); if (doc.id === workspace.activeId) element.setAttribute('aria-current', 'page'); container.append(element);
+        container.append(fileRow(documentTarget(doc), () => { flushAll(); void run(() => bridge.activateDocument(doc.id)); }, doc.path ?? '本机草稿', 'markdown'));
       }
       if (query && !container.childElementCount) container.append(empty('没有匹配的文件'));
-      const open = row('打开文件夹', () => void execute('folder'), '打开文件夹', 'folder-opened'); open.classList.add('sidebar-folder-action'); container.append(open);
     }
-    if (query && !container.querySelector('.sidebar-row')) container.append(empty('没有匹配的文件'));
   }
 }
 function renderTree(container: HTMLElement, entries: FolderEntry[], depth: number) {
   for (const entry of entries) {
-    if (!entry.directory) { const button = row(entry.name, () => void run(() => bridge.openFolderFile(entry.path)), entry.path, /\.txt$/i.test(entry.name) ? 'file' : 'markdown'); button.style.paddingLeft = `${18 + depth * 14}px`; const active = activeDocument()?.path?.toLocaleLowerCase() === entry.path.toLocaleLowerCase(); button.classList.toggle('selected', active); if (active) button.setAttribute('aria-current', 'page'); container.append(button); }
+    if (!entry.directory) {
+      const target = { reference: { path: entry.path }, title: entry.name, path: entry.path };
+      const button = fileRow(target, () => { flushAll(); void run(() => bridge.openFolderFile(entry.path)); }, entry.path, /\.txt$/i.test(entry.name) ? 'file' : 'markdown');
+      button.style.paddingLeft = `${18 + depth * 14}px`;
+      container.append(button);
+    }
     else {
       const details = document.createElement('details'); const summary = document.createElement('summary'); summary.innerHTML = icon('chevron-right').replace('class="replica-icon"', 'class="replica-icon tree-chevron"') + icon('folder'); summary.append(document.createTextNode(entry.name)); summary.style.paddingLeft = `${18 + depth * 14}px`; const children = document.createElement('div'); details.append(summary, children);
       details.addEventListener('toggle', () => { if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path); if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => { if (children.isConnected) renderTree(children, entries, depth + 1); }).catch(error => toast(error.message)); }); details.open = expandedFolders.has(entry.path); container.append(details);
@@ -418,8 +520,7 @@ function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = t
     for (const [theme, label] of THEMES) {
       addMenuItem(label, () => void run(() => bridge.updatePreferences({ theme })), { selected: workspace.preferences.theme === theme });
     }
-  } else if (section === '导出') COMMANDS.filter(command => command.id.startsWith('export-')).forEach(addCommand);
-  else {
+  } else {
     if (section !== trigger.dataset.toolbarMenu) {
       addMenuItem('返回编辑', () => openToolbarMenu(trigger, true), { keepOpen: true }); separateMenu();
     }
@@ -427,7 +528,10 @@ function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = t
       for (const category of ['段落', '格式', '视图']) addMenuItem(category + ' ›', () => openToolbarMenu(trigger, true, category), { keepOpen: true });
       separateMenu();
     }
-    COMMANDS.filter(command => command.category === section && !['auto-save', 'export-pdf', 'export-html'].includes(command.id)).forEach(addCommand);
+    for (const command of COMMANDS.filter(command => command.category === section && !['auto-save', 'rename'].includes(command.id))) {
+      if (command.id === 'export-pdf' || command.id === 'detach') separateMenu();
+      addCommand(command);
+    }
   }
   const bounds = trigger.getBoundingClientRect();
   placeMenu(bounds.left, bounds.bottom + 6, focus);
@@ -460,15 +564,96 @@ function openContextMenu(target: Element, x: number, y: number, keyboard = false
   }
   placeMenu(x, y, keyboard);
 }
+function openFileMenu(element: HTMLElement, x: number, y: number, keyboard: boolean) {
+  const target = fileTarget(element);
+  if (!target) return;
+  cancelRowActivation();
+  hideMenu();
+  element.focus({ preventScroll: true });
+  rememberMenuOrigin(element);
+  const menu = $('#menu');
+  menu.replaceChildren(); menu.setAttribute('aria-label', '文件操作');
+  addMenuItem('重命名', () => beginRename(target, element), { shortcut: commandKeys('rename', workspace.preferences.shortcuts)[0] });
+  if (target.path) addMenuItem('在资源管理器中显示', () => void run(() => bridge.revealDocument(target.reference)));
+  addMenuItem('另存为…', () => void saveFileTarget(target));
+  placeMenu(x, y, keyboard);
+}
+async function saveFileTarget(target: FileTarget) {
+  await Promise.allSettled([...pendingImages]);
+  flushAll();
+  if ('id' in target.reference) { await saveDocument(target.reference.id, 'save-as'); return; }
+  const file = target.reference.path;
+  await run(async () => {
+    const result = await bridge.saveFolderFileAs(file);
+    if (result.ok) await refreshFolder();
+    return result;
+  });
+}
+const renameDialog = $<HTMLDialogElement>('#rename-document');
+const renameInput = $<HTMLInputElement>('#rename-name');
+const renameError = $('#rename-error');
+const renameSubmit = $<HTMLButtonElement>('#rename-document button[type="submit"]');
+const renameCancel = $<HTMLButtonElement>('[data-rename-cancel]');
+let renameTarget: FileTarget | undefined;
+let renameOrigin: HTMLElement | undefined;
+function beginRename(target: FileTarget, origin?: HTMLElement) {
+  if (document.querySelector('dialog[open]')) return;
+  cancelRowActivation();
+  flushAll();
+  renameTarget = target; renameOrigin = origin;
+  renameError.hidden = true; renameInput.removeAttribute('aria-invalid');
+  renameInput.value = target.title;
+  renameDialog.showModal(); reveal(renameDialog, 4);
+  renameInput.focus();
+  const extension = target.path ? /\.(?:md|markdown|mdown|mkd|txt)$/i.exec(target.title) : null;
+  renameInput.setSelectionRange(0, extension?.index ?? target.title.length);
+}
+renameCancel.onclick = () => renameDialog.close();
+renameDialog.oncancel = event => { if (renameSubmit.disabled) event.preventDefault(); };
+renameDialog.onclose = () => {
+  if (renameOrigin?.isConnected) renameOrigin.focus({ preventScroll: true });
+  else activeEditor()?.focus();
+  renameTarget = undefined; renameOrigin = undefined;
+};
+renameInput.oninput = () => { renameError.hidden = true; renameInput.removeAttribute('aria-invalid'); };
+$<HTMLFormElement>('#rename-document form').onsubmit = async event => {
+  event.preventDefault();
+  if (!renameTarget || renameSubmit.disabled) return;
+  const name = renameInput.value.trim();
+  if (name === renameTarget.title) { renameDialog.close(); return; }
+  renameSubmit.disabled = renameCancel.disabled = true;
+  renameInput.readOnly = true;
+  try {
+    const result = await bridge.renameDocument(renameTarget.reference, name);
+    if (!result.ok) throw new Error(result.message ?? '重命名失败');
+    renameDialog.close();
+    void refreshFolder();
+  } catch (error) {
+    renameError.textContent = (error as Error).message;
+    renameError.hidden = false; renameInput.setAttribute('aria-invalid', 'true');
+    renameInput.focus();
+  } finally {
+    renameSubmit.disabled = renameCancel.disabled = false;
+    renameInput.readOnly = false;
+  }
+};
 async function saveDocument(id: string, mode: SaveMode) {
+  const refresh = mode === 'save-as' || !workspace.documents.find(doc => doc.id === id)?.path;
   await run(async () => {
     const result = await bridge.saveDocument(id, mode);
-    if (!result.conflict) return result;
+    if (!result.conflict) {
+      if (result.ok && refresh) await refreshFolder();
+      return result;
+    }
     if (saveConflict.open || !workspace.documents.some(doc => doc.id === id)) return { ok: false, canceled: true };
     const closed = new Promise<string>(resolve => { resolveSaveConflict = resolve; });
     saveConflict.showModal();
     const choice = await closed;
-    if (choice === 'save-as' || choice === 'overwrite-conflict') return bridge.saveDocument(id, choice);
+    if (choice === 'save-as' || choice === 'overwrite-conflict') {
+      const resolved = await bridge.saveDocument(id, choice);
+      if (resolved.ok && choice === 'save-as') await refreshFolder();
+      return resolved;
+    }
     return { ok: false, canceled: true };
   });
   if (!document.querySelector('dialog[open]')) activeEditor()?.focus();
@@ -514,10 +699,24 @@ async function execute(action: string, value?: string) {
   if (['new', 'open', 'save', 'save-as', 'close-tab', 'detach', 'new-window', 'export-html', 'export-pdf'].includes(action)) flushAll();
   if (action === 'new') return run(() => bridge.newDocument()); if (action === 'open') return run(() => bridge.openDocuments());
   if (action === 'save' || action === 'save-as') { if (doc) return saveDocument(doc.id, action); return; }
+  if (action === 'rename') {
+    const focused = document.activeElement as HTMLElement;
+    const file = focused.closest<HTMLElement>('[data-file-row]');
+    const tab = focused.closest<HTMLElement>('.tab');
+    const target = file ? fileTarget(file) : doc && (!tab || tab.dataset.id === doc.id) ? documentTarget(doc) : undefined;
+    if (target) beginRename(target, file ?? tab ?? undefined);
+    return;
+  }
   if (action === 'close-tab') { if (doc) return run(() => bridge.closeDocument(doc.id)); return; }
   if (action === 'new-window') return run(() => bridge.newWindow()); if (action === 'detach' && doc) return run(() => bridge.detachDocument(doc.id));
   if (action === 'recent' && value) return run(() => bridge.openRecent(value));
-  if (action === 'folder') { try { folder = await bridge.openFolder(); if (folder) { library = 'files'; await run(() => bridge.updatePreferences({ sidebar: true })); } } catch (error) { toast((error as Error).message); } return; }
+  if (action === 'folder') {
+    try {
+      const selected = await bridge.openFolder();
+      if (selected) { updateFolder(selected); if (!workspace.preferences.sidebar) await run(() => bridge.updatePreferences({ sidebar: true })); }
+    } catch (error) { toast((error as Error).message); }
+    return;
+  }
   if (['outline', 'files', 'drafts'].includes(action)) { library = action; return run(() => bridge.updatePreferences({ sidebar: true })); }
   if (action === 'sidebar') return run(() => bridge.updatePreferences({ sidebar: !workspace.preferences.sidebar }));
   if (action === 'tabs') return run(() => bridge.updatePreferences({ tabs: workspace.preferences.tabs === false }));
@@ -620,7 +819,15 @@ document.addEventListener('keydown', event => {
     } else hideMenu(true);
     return;
   }
-  if (target?.closest('#editor-stage') && !event.isComposing && !compositionTarget && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
+  const keyboardMenu = event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey;
+  const file = target?.closest<HTMLElement>('[data-file-row]');
+  if (file && keyboardMenu && !event.isComposing && !compositionTarget) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const bounds = file.getBoundingClientRect();
+    openFileMenu(file, bounds.left, bounds.bottom, true);
+    return;
+  }
+  if (target?.closest('#editor-stage') && !event.isComposing && !compositionTarget && keyboardMenu) {
     event.preventDefault(); event.stopImmediatePropagation();
     const selected = window.getSelection();
     const bounds = selected?.rangeCount && target.contains(selected.anchorNode) ? selected.getRangeAt(0).getBoundingClientRect() : target.getBoundingClientRect();
@@ -659,9 +866,16 @@ $('#editor-stage').addEventListener('contextmenu', event => {
   event.preventDefault();
   openContextMenu(event.target as Element, event.clientX, event.clientY);
 });
+$('#sidebar-content').addEventListener('contextmenu', event => {
+  const file = (event.target as Element).closest<HTMLElement>('[data-file-row]');
+  if (!file) return;
+  event.preventDefault();
+  openFileMenu(file, event.clientX, event.clientY, false);
+});
 for (const button of document.querySelectorAll<HTMLElement>('[data-control]')) button.onclick = () => bridge.windowControl(button.dataset.control as 'minimize' | 'maximize' | 'close');
 for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) button.onclick = () => { const next = button.dataset.library!; if (library === next) return; library = next; $<HTMLInputElement>('#sidebar-filter').value = ''; renderSidebar(); reveal($('#sidebar-content'), 3); };
 $('#add-tab').onclick = $('#new-empty').onclick = () => void execute('new'); $('#open-empty').onclick = () => void execute('open');
+$('#sidebar-open-folder').onclick = () => void execute('folder');
 $('#toggle-sidebar').onclick = () => void execute('sidebar'); $('#source-mode').onmousedown = event => event.preventDefault(); $('#source-mode').onclick = () => void execute('toggle-source');
 $('#quick-input').oninput = renderQuick; $('#quick-input').onkeydown = event => {
   if (event.isComposing || event.keyCode === 229) return;

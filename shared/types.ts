@@ -1,5 +1,5 @@
 import type { ShortcutOverrides } from './commands';
-import type { CodeThemeSnapshot } from './code-theme';
+import type { CodeThemePreference, CodeThemeSnapshot } from './code-theme';
 import type { PrintOptions, PrintPreferences, PdfPreviewResult, PdfFirstPage } from './print';
 export type SaveStatus = 'saved' | 'draft' | 'saving' | 'error' | 'conflict';
 export interface DocumentView {
@@ -24,12 +24,14 @@ export interface WorkspaceView {
   activeId: string | null;
   drafts: DocumentView[];
   recent: string[];
-  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: 'modern-dark' | 'vscode' | 'github-dark'; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; shortcuts?: ShortcutOverrides; print?: PrintPreferences };
+  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: CodeThemePreference; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; shortcuts?: ShortcutOverrides; print?: PrintPreferences };
   codeTheme?: CodeThemeSnapshot;
   recovered: boolean;
 }
 export type AppCommand = string;
 export interface FolderEntry { name: string; path: string; directory: boolean }
+export interface FolderView { path: string; entries: FolderEntry[]; hasParent: boolean }
+export type DocumentReference = { id: string } | { path: string };
 export interface ActionResult { ok: boolean; message?: string; canceled?: boolean; conflict?: boolean }
 export type SaveMode = 'save' | 'save-as' | 'overwrite-conflict';
 export type UpdateAction = 'status' | 'check' | 'download' | 'cancel' | 'install';
@@ -48,6 +50,9 @@ export interface RypotaBridge {
   reorderDocuments(ids: string[]): Promise<ActionResult>;
   updateDocument(id: string, content: string, revision: number): void;
   saveDocument(id: string, mode?: SaveMode): Promise<ActionResult>;
+  renameDocument(document: DocumentReference, name: string): Promise<ActionResult>;
+  revealDocument(document: DocumentReference): Promise<ActionResult>;
+  saveFolderFileAs(path: string): Promise<ActionResult>;
   organizeImages(id: string): Promise<ActionResult>;
   closeDocument(id: string): Promise<ActionResult>;
   restoreDraft(id: string): Promise<ActionResult>;
@@ -59,12 +64,14 @@ export interface RypotaBridge {
   onPortableUpdate(listener: (state: UpdateState) => void): () => void;
   windowControl(action: 'minimize' | 'maximize' | 'close'): void;
   openExternal(url: string): Promise<ActionResult>;
-  openFolder(): Promise<{ path: string; entries: FolderEntry[] } | null>;
+  openFolder(): Promise<FolderView | null>;
+  openParentFolder(path: string): Promise<FolderView | null>;
   listFolder(path: string): Promise<FolderEntry[]>;
   openFolderFile(path: string): Promise<ActionResult>;
   insertImage(id: string, data?: { bytes: number[]; name: string }): Promise<{ url?: string; message?: string }>;
   exportDocument(id: string, format: 'html' | 'pdf', html: string): Promise<ActionResult>;
   previewPdf(id: string, html: string, options: PrintOptions, requestId?: string): Promise<PdfPreviewResult>;
+  previewPdfFirstPage(id: string, html: string, options: PrintOptions, requestId: string): Promise<void>;
   onPdfFirstPage(listener: (page: PdfFirstPage) => void): () => void;
   savePdf(previewId: string, fonts?: PrintPreferences['fonts']): Promise<ActionResult>;
   releasePdf(): Promise<void>;

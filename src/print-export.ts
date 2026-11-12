@@ -8,9 +8,10 @@ import italic from '../assets/fonts/SourceCodePro-It.woff2?inline';
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 
-export async function printHTML(source: string, title: string, host: Host, options: PrintOptions): Promise<string> {
+export async function printHTML(source: string, title: string, host: Host, options: PrintOptions, signal?: AbortSignal): Promise<string> {
   const article = document.createElement('article'); article.className = options.layout === 'portrait' ? 'single' : 'columns';
   const render = async (node: MarkdownNode): Promise<Node> => {
+    signal?.throwIfAborted();
     if (node.type === 'html') {
       const raw = document.createElement('div'); raw.className = 'print-raw'; raw.innerHTML = DOMPurify.sanitize(node.value ?? '', { ADD_TAGS: ['mjx-container'] });
       for (const math of raw.querySelectorAll('mjx-container')) {
@@ -32,6 +33,7 @@ export async function printHTML(source: string, title: string, host: Host, optio
       }
       const value = node.value ?? '', pre = document.createElement('pre'); pre.className = `print-code ${options.lineNumbers ? 'numbered' : ''}`;
       const tokens = await tokenizeGithub(value, node.lang ?? '', options.color === 'mono' ? 'moye-print-mono' : 'github-light');
+      signal?.throwIfAborted();
       const lines = value.split('\n'); const body = document.createElement('code');
       const rows = lines.map((text, index) => {
         const line = document.createElement('span'); line.className = 'print-code-line'; line.dataset.line = String(index + 1);
@@ -74,7 +76,15 @@ export async function printHTML(source: string, title: string, host: Host, optio
     }
     return renderNode(node, host);
   };
-  for (const node of parseMarkdown(source).children ?? []) if (node.type !== 'yaml' && node.type !== 'definition') article.append(await render(node));
+  let yieldAt = performance.now() + 32;
+  for (const node of parseMarkdown(source).children ?? []) {
+    if (node.type !== 'yaml' && node.type !== 'definition') article.append(await render(node));
+    if (performance.now() >= yieldAt) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      signal?.throwIfAborted();
+      yieldAt = performance.now() + 32;
+    }
+  }
   for (const table of article.querySelectorAll('table:not(:has(thead))')) { const first = table.querySelector('tr'); if (first?.querySelector('th')) { const head = document.createElement('thead'); head.append(first); table.prepend(head); } }
   const safeTitle = document.createElement('title'); safeTitle.textContent = title;
   const geometry = printGeometry(options.layout), font = options.codeFontPt, maxHeight = geometry.heightMm - geometry.topMm - geometry.bottomMm;

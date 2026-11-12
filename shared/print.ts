@@ -3,6 +3,24 @@ export interface PrintOptions { layout: PrintLayout; color: 'mono' | 'light'; co
 export interface PrintPreferences { layout: PrintLayout; color: PrintOptions['color']; lineNumbers: boolean; fonts: Record<PrintLayout, number> }
 export type PdfPreviewResult = { ok: true; previewId: string; bytes: Uint8Array } | { ok: false; canceled?: boolean; message?: string };
 export interface PdfFirstPage { requestId: string; documentId: string; bytes: Uint8Array }
+
+export function printPrefix(source: string): string | undefined {
+  const characterLimit = 24_000;
+  const window = source.slice(0, characterLimit);
+  let lineStart = 0;
+  for (let line = 0; line < 140; line++) {
+    const next = window.indexOf('\n', lineStart);
+    if (next === -1) {
+      if (source.length <= characterLimit) return undefined;
+      // Include enough of a long line to fill the page without splitting a
+      // Unicode surrogate pair at the cut.
+      const last = window.charCodeAt(characterLimit - 1);
+      return last >= 0xd800 && last <= 0xdbff ? window.slice(0, -1) : window;
+    }
+    lineStart = next + 1;
+  }
+  return lineStart < source.length ? window.slice(0, lineStart) : undefined;
+}
 export function validatePrintOptions(value: unknown): PrintOptions {
   const v = value as PrintOptions;
   if (!v || !['portrait', 'landscape-two-column'].includes(v.layout) || !['mono', 'light'].includes(v.color) || typeof v.lineNumbers !== 'boolean' || !Number.isFinite(v.codeFontPt) || v.codeFontPt < 8 || v.codeFontPt > 12 || v.codeFontPt * 2 !== Math.round(v.codeFontPt * 2)) throw new Error('打印设置不正确');

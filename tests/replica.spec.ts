@@ -20,12 +20,109 @@ async function setContent(page: Page, content: string) { await page.evaluate(con
 async function content(page: Page) { return page.evaluate(() => (window as any).__editor.content()); }
 async function execute(page: Page, command: string) { await page.evaluate(command => (window as any).__editor.execute(command), command); }
 async function toolbarAction(page: Page, section: string, action: string) {
-  const top = ['文件', '导出', '编辑'].includes(section) ? section : '编辑';
+  const top = ['文件', '编辑'].includes(section) ? section : '编辑';
   await page.getByRole('button', { name: top, exact: true }).click();
   if (top !== section) await page.getByRole('menu', { name: top }).getByRole('menuitem', { name: `${section} ›`, exact: true }).click();
   await page.getByRole('menu', { name: section, exact: true }).getByRole('menuitem', { name: new RegExp(`^${action}( |$)`) }).click();
 }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
+
+test('文件菜单、父目录、资源管理器、另存为和 F2 重命名贯通桌面入口', async ({}, testInfo) => {
+  const { application, page, directory } = await launch();
+  const rootFolder = path.join(directory, '笔记');
+  const child = path.join(rootFolder, '算法');
+  const file = path.join(child, '原始.md');
+  const occupied = path.join(child, '同名.md');
+  const renamed = path.join(child, '重命名成功.md');
+  const tabRenamed = path.join(child, '标签重命名.md');
+  const copy = path.join(child, '另存副本.md');
+  await fs.mkdir(child, { recursive: true });
+  await fs.writeFile(file, '# 编辑时的 Markdown');
+  await fs.writeFile(occupied, '# 不能被覆盖');
+  try {
+    await application.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, child);
+    await expect(page.locator('[data-toolbar-menu="导出"]')).toHaveCount(0);
+    await toolbarAction(page, '文件', '打开文件夹');
+    const sidebar = page.locator('#sidebar');
+    const parent = sidebar.getByRole('button', { name: '上一级文件夹', exact: true });
+    const footer = sidebar.getByRole('button', { name: '打开文件夹…', exact: true });
+    const menu = page.getByRole('menu', { name: '文件操作', exact: true });
+    const rename = page.getByRole('dialog', { name: '重命名', exact: true });
+    const renameInput = rename.getByRole('textbox', { name: '文件名', exact: true });
+    await expect(sidebar.locator('#sidebar-content > :first-child')).toHaveText('..');
+    await expect(sidebar.locator('.folder-heading')).toHaveText('算法');
+    await expect(footer).toBeVisible();
+    await parent.click();
+    await expect(sidebar.locator('.folder-heading')).toHaveText('笔记');
+    await footer.click();
+    await expect(sidebar.locator('.folder-heading')).toHaveText('算法');
+    await parent.click();
+    await sidebar.locator('summary').filter({ hasText: '算法' }).click();
+
+    const originalRow = sidebar.getByRole('button', { name: '原始.md', exact: true });
+    await application.evaluate(({ shell }) => { shell.showItemInFolder = file => { (globalThis as any).__shownInFolder = file; }; });
+    await originalRow.click({ button: 'right' });
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: '在资源管理器中显示', exact: true }).click();
+    await expect.poll(() => application.evaluate(() => (globalThis as any).__shownInFolder)).toBe(file);
+    await originalRow.focus();
+    await page.keyboard.press('F2');
+    await expect(renameInput).toHaveValue('原始.md');
+    await renameInput.fill('同名');
+    await renameInput.press('Enter');
+    await expect(rename.getByRole('alert')).toHaveText('同名文件已存在');
+    expect(await fs.readFile(occupied, 'utf8')).toBe('# 不能被覆盖');
+    await renameInput.fill('重命名成功');
+    await renameInput.press('Enter');
+    await expect(rename).toBeHidden();
+    const renamedRow = sidebar.getByRole('button', { name: '重命名成功.md', exact: true });
+    await expect(renamedRow).toBeVisible();
+    expect(await fs.readFile(renamed, 'utf8')).toBe('# 编辑时的 Markdown');
+    await expect(fs.stat(file)).rejects.toThrow();
+
+    await chooseSave(application, copy);
+    await renamedRow.click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: '另存为…', exact: true }).click();
+    await expect(sidebar.getByRole('button', { name: '另存副本.md', exact: true })).toBeVisible();
+    expect(await fs.readFile(copy, 'utf8')).toBe('# 编辑时的 Markdown');
+    await renamedRow.click();
+    const activeTab = page.getByRole('tab', { name: '重命名成功.md', exact: true });
+    await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+    await activeTab.dblclick();
+    await expect(renameInput).toHaveValue('重命名成功.md');
+    await page.screenshot({ path: testInfo.outputPath('rename.png') });
+    await renameInput.fill('标签重命名');
+    await renameInput.press('Enter');
+    await expect(page.getByRole('tab', { name: '标签重命名.md', exact: true })).toBeVisible();
+    expect(await fs.readFile(tabRenamed, 'utf8')).toBe('# 编辑时的 Markdown');
+    await page.screenshot({ path: testInfo.outputPath('files.png') });
+
+    await execute(page, 'new');
+    const backgroundCopy = path.join(child, '后台另存.md');
+    await chooseSave(application, backgroundCopy);
+    const activeId = await page.locator('.tab.active').getAttribute('data-id');
+    await sidebar.getByRole('button', { name: '标签重命名.md', exact: true }).click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: '另存为…', exact: true }).click();
+    await expect(sidebar.getByRole('button', { name: '后台另存.md', exact: true })).toBeVisible();
+    await expect(page.locator('.tab.active')).toHaveAttribute('data-id', activeId!);
+    expect(await fs.readFile(tabRenamed, 'utf8')).toBe('# 编辑时的 Markdown');
+    expect(await fs.readFile(backgroundCopy, 'utf8')).toBe('# 编辑时的 Markdown');
+    await setContent(page, '未命名草稿正文');
+    await page.locator('.tab.active .tab-close').click();
+    await sidebar.getByRole('button', { name: '草稿', exact: true }).click();
+    const draftRow = sidebar.locator('[data-file-row]').first();
+    await draftRow.dblclick();
+    await expect(rename).toBeVisible();
+    await renameInput.fill('新草稿名');
+    await renameInput.press('Enter');
+    await expect(sidebar.getByRole('button', { name: '新草稿名', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '新草稿名', exact: true })).toHaveCount(0);
+    await chooseSave(application, path.join(child, '草稿另存.md'));
+    await sidebar.getByRole('button', { name: '新草稿名', exact: true }).click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: '另存为…', exact: true }).click();
+    await expect.poll(() => fs.readFile(path.join(child, '草稿另存.md'), 'utf8').catch(() => '')).toBe('未命名草稿正文');
+  } finally { await application.close(); }
+});
 
 test('启动、新建和打开后可立即输入，标签方向键可连续导航并保留各自正文', async () => {
   const { application, page, directory } = await launch();
@@ -90,6 +187,43 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
     await expect(theme).toHaveValue('dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect(page.locator('#preferences')).toBeVisible();
+  } finally { await application.close(); }
+});
+
+test('2026 代码主题独立于正文主题，设置文字不可拖选而输入框仍可选', async () => {
+  const { application, page } = await launch();
+  try {
+    await setContent(page, '正文文字\n\n```cpp\nint main() { return 0; }\n```');
+    const block = current(page).locator('.md-code');
+    await execute(page, 'preferences');
+    const picker = page.locator('#code-theme-select');
+    await picker.selectOption('dark-2026');
+    await expect(block).toHaveCSS('background-color', 'rgb(18, 19, 20)');
+    await picker.selectOption('light-2026');
+    await expect(block).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.codeTheme)).toBe('light-2026');
+
+    await page.getByRole('tab', { name: '快捷键' }).click();
+    const heading = page.locator('.settings-header h2');
+    const bounds = await heading.boundingBox();
+    if (!bounds) throw new Error('设置标题不可见');
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await page.mouse.move(bounds.x + 1, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 8 });
+    await page.mouse.up();
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+
+    const search = page.getByRole('searchbox', { name: '搜索快捷键' });
+    await search.fill('导出');
+    await search.press('Control+a');
+    expect(await search.evaluate(input => (input as HTMLInputElement).selectionEnd)).toBe(2);
+    expect(await search.evaluate(input => (input as HTMLInputElement).selectionStart)).toBe(0);
+    await page.getByRole('button', { name: '关闭设置' }).click();
+    await current(page).locator('.markdown-editor .cm-content').first().click();
+    await page.keyboard.press('Control+a');
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.empty)).toBe(false);
   } finally { await application.close(); }
 });
 
@@ -162,15 +296,16 @@ test('文件侧栏只展示当前上下文，快速打开按路径区分同名�
     for (const file of [first, second]) { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, file === first ? '# 课程笔记' : '# 竞赛笔记'); }
     await application.evaluate(({ dialog }, files) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files }); }, [first, second]); await execute(page, 'open');
     await execute(page, 'files'); await expect(page.locator('#sidebar-content [aria-current=page]')).toHaveText('笔记.md');
-    await expect(page.locator('.sidebar-folder-action')).toBeVisible();
+    await expect(page.locator('#sidebar-open-folder')).toBeVisible();
     await page.locator('#sidebar-filter').fill('不存在'); await expect(page.locator('#sidebar-content')).toContainText('没有匹配的文件');
     await execute(page, 'quick-open'); await page.locator('#quick-input').fill('笔记'); await expect(page.locator('.quick-result')).toHaveCount(2);
     await expect(page.locator('.quick-result small')).toHaveText([path.dirname(first), path.dirname(second)]); await expect(page.locator('.quick-current')).toHaveCount(1);
     await page.locator('#quick-input').fill('课程'); await page.keyboard.press('Enter'); expect(await content(page)).toBe('# 课程笔记');
     await execute(page, 'quick-open'); await page.locator('.titlebar').click({ position: { x: 8, y: 8 }, force: true }); await expect(page.locator('#quick-open')).toBeHidden();
     await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, path.dirname(first));
-    await page.locator('#sidebar-filter').fill(''); await page.locator('.sidebar-folder-action').click();
-    await expect(page.locator('#folder-name')).toHaveText('课程'); await expect(page.locator('#sidebar-content .sidebar-row')).toHaveCount(1);
+    await page.locator('#sidebar-filter').fill(''); await page.locator('#sidebar-open-folder').click();
+    await expect(page.locator('.folder-heading')).toHaveText('课程');
+    await expect(page.locator('#sidebar-content [data-file-row]')).toHaveCount(1);
     await expect(page.locator('#sidebar-content [aria-current=page]')).toHaveText('笔记.md'); expect(await content(page)).toBe('# 课程笔记');
   } finally { await application.close(); }
 });
@@ -366,12 +501,19 @@ test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关�
   } finally { await application.close(); }
 });
 
-test('长文先显示实际首页，整份完成前不可保存，接收旧请求的首页不改变当前预览', async () => {
+test('长文先排版开头，整份完成前不可保存，接收旧请求的首页不改变当前预览', async () => {
   const { application, page, directory } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   try {
     await application.evaluate(({ app }) => {
       (globalThis as any).__holdFull = true;
       app.on('browser-window-created', (_event, window) => {
+        const load = window.loadURL.bind(window);
+        window.loadURL = async (url, options) => {
+          const html = Buffer.from(url.slice(url.indexOf(',') + 1), 'base64').toString();
+          if (html.includes('PRINT_END')) (globalThis as any).__fullHtmlLength = html.length;
+          else (globalThis as any).__prefixHtmlLength = html.length;
+          return load(url, options);
+        };
         const print = window.webContents.printToPDF.bind(window.webContents);
         window.webContents.printToPDF = async options => {
           if (!options?.pageRanges && (globalThis as any).__holdFull) await new Promise<void>(resolve => { (globalThis as any).__releaseFull = resolve; });
@@ -382,8 +524,10 @@ test('长文先显示实际首页，整份完成前不可保存，接收旧请�
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1250, height: 900 }); window.showInactive(); });
     const raw = '# 分阶段打印\n\n```cpp\n' + Array.from({ length: 180 }, (_, i) => `int line_${String(i).padStart(3, '0')} = ${i}; // 中文注释`).join('\n') + '\n```\n\nPRINT_END';
     await setContent(page, raw); await execute(page, 'export-pdf'); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('#print-page-count')).toHaveText('首页预览');
     await expect(page.locator('#print-save')).toBeDisabled(); await expect(page.locator('#print-preview')).not.toHaveAttribute('data-preview-id');
     const first = await application.evaluate(() => (globalThis as any).__firstPage); await fs.writeFile(path.join(directory, 'first-page.pdf'), Buffer.from(first, 'base64'));
+    await expect.poll(() => application.evaluate(() => (globalThis as any).__fullHtmlLength > (globalThis as any).__prefixHtmlLength)).toBe(true);
     await application.evaluate(() => { (globalThis as any).__holdFull = false; (globalThis as any).__releaseFull(); });
     await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); expect(Number.parseInt(await page.locator('#print-page-count').innerText())).toBeGreaterThan(1);
     const token = await page.locator('#print-preview').getAttribute('data-preview-id'); const count = await page.locator('.print-page').count();
@@ -552,7 +696,7 @@ test('标题栏导出 HTML 后表格占满正文，窄屏长单元格仍会折�
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await chooseSave(application, target);
       const expectedBg = await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--bg').trim());
-      await toolbarAction(page, '导出', '导出 HTML');
+      await toolbarAction(page, '文件', '导出 HTML');
       await expect.poll(() => fs.readFile(target, 'utf8').catch(() => '')).toContain(`--bg:${expectedBg}`);
       const opened = application.waitForEvent('window');
       await application.evaluate(({ BrowserWindow }, file) => { const preview = new BrowserWindow({ width: 400, height: 600, show: false }); void preview.loadFile(file); }, target);
@@ -771,7 +915,7 @@ test('无选区 Ctrl+C/X 和菜单处理整行，选区保持精确并支持撤�
   } finally { await application.close(); }
 });
 
-test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌套、续行和导出', async () => {
+test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌套、续行和导出', async ({}, testInfo) => {
   const { application, page, directory } = await launch();
   try {
     const raw = '1. 代码段\n1. 数据段\n1. BSS 段\n1. 堆段\n1. 文件映射段\n1. 栈段\n\n结尾'; await setContent(page, raw);
@@ -779,7 +923,7 @@ test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌�
     await expect.poll(labels).toEqual(['1.', '2.', '3.', '4.', '5.', '6.']); expect(await content(page)).toBe(raw);
     await expect(current(page).locator('.md-list-number').nth(1)).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
     expect(await current(page).locator('.md-list-number').nth(1).evaluate(marker => getComputedStyle(marker, '::after').content)).toBe('"2."');
-    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 760 }); window.showInactive(); }); await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: 'docs/ordered-list-preview.png' });
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 760 }); window.showInactive(); }); await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: testInfo.outputPath('ordered-list-preview.png') });
     const body = current(page).locator('.cm-line').filter({ hasText: 'BSS 段' }); const point = await body.evaluate(line => { const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const index = node.textContent!.indexOf('BSS'); if (index < 0) continue; const range = document.createRange(); range.setStart(node, index + 1); range.collapse(true); const box = range.getBoundingClientRect(); return { x: box.x + .2, y: box.y + box.height / 2 }; } throw new Error('Missing text'); });
     await page.mouse.click(point.x, point.y); expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(raw.indexOf('BSS') + 1);
     const cdp = await page.context().newCDPSession(page); await cdp.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 }); await cdp.send('Input.insertText', { text: '拼' }); await expect.poll(() => content(page)).toBe(raw.replace('BSS', 'B拼SS')); await page.keyboard.press('Control+z'); expect(await content(page)).toBe(raw);
@@ -789,6 +933,66 @@ test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌�
     const nested = '5. 第五项\n1. 第六项\n\n   3. 子项三\n   1. 子项四\n1. 第七项\n\n分隔段落\n\n0) 零\n1) 一\n\n结尾'; await setContent(page, nested);
     await expect.poll(labels).toEqual(['5.', '6.', '3.', '4.', '7.', '0)', '1)']); expect(await content(page)).toBe(nested);
     const exported = path.join(directory, '列表.html'); await chooseSave(application, exported); await execute(page, 'export-html'); const html = await fs.readFile(exported, 'utf8'); expect(html).toContain('<ol start="5">'); expect(html).toContain('<ol start="3">'); expect(html).toContain('<ol start="0">');
+  } finally { await application.close(); }
+});
+
+test('有序列表正文起点显示拼音、保留光标，编辑列表标题时露出标题标记', async () => {
+  const { application, page } = await launch();
+  try {
+    const raw = '1. 第一项\n1. 第二项\n1. vscode 代码块主题\n\n结尾';
+    await setContent(page, raw);
+    const position = raw.indexOf('vscode');
+    const editor = current(page).locator('.markdown-editor');
+    const click = await page.evaluate(position => {
+      const view = (window as any).__editor.active().view;
+      const caret = view.coordsAtPos(position, 1);
+      return { x: caret.left + 1, y: (caret.top + caret.bottom) / 2 };
+    }, position);
+    await page.mouse.click(click.x, click.y);
+    const head = () => page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head);
+    expect(await head()).toBe(position);
+    const cdp = await page.context().newCDPSession(page);
+    const lefts = [];
+    for (const pinyin of ['t', 'tia', 'tianjia']) {
+      await cdp.send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
+      await expect.poll(() => content(page)).toBe(raw.replace('vscode', pinyin + 'vscode'));
+      expect(await head()).toBe(position + pinyin.length);
+      lefts.push(await page.evaluate(pinyin => {
+        const native = window.getSelection()!;
+        const text = native.anchorNode!;
+        const line = text.parentElement!.closest('.cm-line')!;
+        if (text.parentElement!.closest('.md-list-number') || !text.textContent?.includes(pinyin) ||
+            getComputedStyle(text.parentElement!).color === 'rgba(0, 0, 0, 0)') throw new Error('拼音落在隐藏的列表标记里');
+        const caret = native.getRangeAt(0).getBoundingClientRect();
+        if (caret.height <= 0 || caret.bottom > line.getBoundingClientRect().bottom + 1) throw new Error('组合输入光标不在正文行');
+        return caret.left;
+      }, pinyin));
+    }
+    expect(lefts[1]).toBeGreaterThan(lefts[0]);
+    expect(lefts[2]).toBeGreaterThan(lefts[1]);
+    await page.evaluate(raw => (window as any).__editor.active().replace(raw), raw);
+    expect(await content(page)).toBe(raw.replace('vscode', 'tianjiavscode'));
+    const savedContent = () => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content);
+    expect(await savedContent()).toBe(raw);
+    await cdp.send('Input.insertText', { text: '添加' });
+    await expect.poll(savedContent).toBe(raw.replace('vscode', '添加vscode'));
+    expect(await head()).toBe(position + '添加'.length);
+    await page.keyboard.press('Control+z');
+    expect(await content(page)).toBe(raw);
+
+    const heading = '8. # <- 这个应该是一个显示 bug\n\n正文';
+    await setContent(page, heading);
+    const title = editor.locator('.md-list.md-h1');
+    await expect(title).toContainText('<- 这个应该是一个显示 bug');
+    const select = (anchor: number) => page.evaluate(anchor => {
+      const view = (window as any).__editor.active().view;
+      view.dispatch({ selection: { anchor } });
+    }, anchor);
+    await select(heading.length);
+    await expect(title.locator('.md-heading-marker')).toHaveCount(0);
+    await select(heading.indexOf('<-'));
+    await expect(title.locator('.md-heading-marker')).toHaveText('#');
+    expect(await content(page)).toBe(heading);
   } finally { await application.close(); }
 });
 
@@ -933,6 +1137,8 @@ test('大纲与目录隐藏标题高亮标记，正文高亮随主题更新', as
     expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(raw.indexOf('## <mark>'));
     const highlights = current(page).locator('.md-heading .md-highlight');
     await expect(highlights).toHaveText(['重点', '例题']);
+    await execute(page, 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     const dark = await highlights.first().evaluate(el => getComputedStyle(el).backgroundColor);
     await execute(page, 'light');
     await expect(highlights.first()).not.toHaveCSS('background-color', dark);

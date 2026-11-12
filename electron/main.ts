@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DocumentStore, FileConflictError, atomicWrite } from './store';
 import type { ActionResult, AppCommand, SaveMode, UpdateAction } from '../shared/types';
-import { MODERN_DARK, GITHUB_DARK } from '../shared/code-theme';
+import type { DocumentReference } from '../shared/types';
+import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
 import { repairWindowsShortcuts } from './windows-integration';
@@ -30,6 +31,7 @@ const allowedClose = new Set<number>();
 const closing = new Set<number>();
 const pendingClose = new Map<string, { sender: number; resolve: () => void }>();
 const folders = new Map<string, string>();
+const folderNavigation = new Map<string, symbol>();
 const fileWatchers = new Map<string, { file: string; watcher: FSWatcher; timer?: ReturnType<typeof setTimeout> }>();
 const store = new DocumentStore(path.join(app.getPath('userData'), 'recovery'));
 const devUrl = process.env.TYPORA_REPLICA_DEV_URL;
@@ -42,7 +44,10 @@ const updates = new PortableUpdates({ version: app.getVersion(), executable: pro
   changed: state => { for (const window of windows.values()) if (!window.isDestroyed()) window.webContents.send('update:state', state); },
 });
 const codeTheme = new VscodeThemeSync(() => publish());
-function workspaceView(id: string) { return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: store.preferences.codeTheme === 'vscode' ? codeTheme.current : store.preferences.codeTheme === 'github-dark' ? GITHUB_DARK : MODERN_DARK }; }
+function workspaceView(id: string) {
+  const theme = store.preferences.codeTheme ?? 'modern-dark';
+  return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: theme === 'vscode' ? codeTheme.current : BUILTIN_CODE_THEMES[theme] };
+}
 function newBlankWindow() { const id = store.newWindow(); store.newDocument(id); return createWindow(id); }
 function relaunchCommand() { return [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(value => `"${value}"`).join(' ') + ' --new-window'; }
 
@@ -103,7 +108,7 @@ function createWindow(id: string = store.newWindow()) {
       } catch (error) { closing.delete(window.id); notify(window, `暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`); }
     })();
   });
-  window.on('closed', () => { pdfPreviews.dispose(id); windows.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
+  window.on('closed', () => { pdfPreviews.dispose(id); windows.delete(id); folders.delete(id); folderNavigation.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
   window.webContents.on('render-process-gone', (_event, details) => { console.error('Renderer stopped:', details.reason); void store.persist().catch(() => {}); });
   if (devUrl) void window.loadURL(devUrl);
   else void window.loadURL('replica://app/index.html');
@@ -139,9 +144,17 @@ function registerIpc() {
     try {
       const owner = windowIdOf(event); requireOwned(owner, documentId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('打印文档过大');
       if (requestId !== undefined && (typeof requestId !== 'string' || !/^[a-f0-9-]{36}$/i.test(requestId))) throw new Error('打印请求不正确');
-      return await pdfPreviews.preview(owner, { ...store.documents.get(documentId)! }, html, validatePrintOptions(options), requestId ? bytes => { if (!event.sender.isDestroyed()) event.sender.send('pdf:first-page', { requestId, documentId, bytes }); } : undefined);
+      return await pdfPreviews.preview(owner, { ...store.documents.get(documentId)! }, html, validatePrintOptions(options), requestId);
     }
     catch (error) { return { ok: false, message: (error as Error).message }; }
+  });
+  ipcMain.handle('pdf:first-page-request', async (event, documentId: string, html: string, options, requestId: string) => {
+    const owner = windowIdOf(event);
+    requireOwned(owner, documentId);
+    if (typeof html !== 'string' || html.length > 2 * 1024 * 1024 || typeof requestId !== 'string' || !/^[a-f0-9-]{36}$/i.test(requestId)) return;
+    await pdfPreviews.previewFirstPage(owner, store.documents.get(documentId)!.title, html, validatePrintOptions(options), requestId, bytes => {
+      if (!event.sender.isDestroyed()) event.sender.send('pdf:first-page', { requestId, documentId, bytes });
+    });
   });
   ipcMain.handle('pdf:release', event => { pdfPreviews.release(windowIdOf(event)); });
   ipcMain.handle('workspace:bootstrap', event => workspaceView(windowIdOf(event)));
@@ -175,16 +188,25 @@ function registerIpc() {
     for (const file of result.filePaths) await openFile(windowId, file);
   });
   handle('document:recent', async (windowId, file: string) => { if (!store.recent.includes(file)) throw new Error('找不到这个最近使用的文件'); await openFile(windowId, file); });
+  const saveAs = async (windowId: string, filename: string) => {
+    const result = await dialog.showSaveDialog(windows.get(windowId)!, {
+      title: '另存为', defaultPath: /\.(md|markdown|mdown|mkd|txt)$/i.test(filename) ? filename : filename + '.md',
+      filters: [{ name: 'Markdown 文档', extensions: ['md', 'markdown', 'mdown', 'mkd'] }, { name: '文本文件', extensions: ['txt'] }],
+      properties: ['showOverwriteConfirmation', 'createDirectory'],
+    });
+    if (result.canceled || !result.filePath) throw new Error('canceled');
+    return result.filePath;
+  };
   handle('document:save', async (windowId, id: string, mode: SaveMode = 'save') => {
-    requireOwned(windowId, id); const document = store.documents.get(id)!;
+    if (mode !== 'save-as') requireOwned(windowId, id);
+    const document = store.accessibleDocument(windowId, id);
     if (mode === 'overwrite-conflict') {
       if (!document.path || document.status !== 'conflict') throw new Error('保存状态已变化，请重新保存。');
       await store.save(id, undefined, true);
     } else if (mode === 'save-as' || !document.path) {
-      const result = await dialog.showSaveDialog(windows.get(windowId)!, { title: '保存 Markdown 文档', defaultPath: document.path ?? `${document.title}.md`, filters: [{ name: 'Markdown 文档', extensions: ['md'] }], properties: ['showOverwriteConfirmation', 'createDirectory'] });
-      if (result.canceled || !result.filePath) throw new Error('canceled');
-      requireOwned(windowId, id);
-      await store.save(id, result.filePath, true);
+      const target = await saveAs(windowId, document.path ?? document.title);
+      store.accessibleDocument(windowId, id);
+      await store.save(id, target, true);
     } else await store.save(id);
     await store.persist();
   });
@@ -210,15 +232,57 @@ function registerIpc() {
   const checkFolder = async (id: string, candidate: string) => {
     const root = folders.get(id); if (!root || typeof candidate !== 'string') throw new Error('请先选择文件夹');
     const real = await fs.realpath(candidate); const relative = path.relative(root, real);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('文件不在当前文件夹中'); return real;
+    if (folders.get(id) !== root || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('文件不在当前文件夹中');
+    return real;
+  };
+  const checkFolderFile = async (id: string, file: string) => {
+    const real = await checkFolder(id, file);
+    if (!/\.(md|markdown|mdown|mkd|txt)$/i.test(real) || !(await fs.lstat(file)).isFile()) throw new Error('请选择 Markdown 或文本文件');
+    return real;
+  };
+  const beginFolderNavigation = (id: string) => {
+    const navigation = Symbol();
+    folderNavigation.set(id, navigation);
+    return navigation;
+  };
+  const selectFolder = async (id: string, input: string, navigation: symbol) => {
+    const directory = await fs.realpath(input);
+    const entries = await folderEntries(directory);
+    if (folderNavigation.get(id) !== navigation) return null;
+    folders.set(id, directory);
+    return { path: directory, entries, hasParent: path.dirname(directory) !== directory };
   };
   ipcMain.handle('folder:open', async event => {
-    const id = windowIdOf(event); const result = await dialog.showOpenDialog(windows.get(id)!, { title: '打开文件夹', properties: ['openDirectory'] });
+    const id = windowIdOf(event);
+    const navigation = beginFolderNavigation(id);
+    const result = await dialog.showOpenDialog(windows.get(id)!, { title: '打开文件夹', defaultPath: folders.get(id), properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
-    const directory = await fs.realpath(result.filePaths[0]); folders.set(id, directory); return { path: directory, entries: await folderEntries(directory) };
+    return selectFolder(id, result.filePaths[0], navigation);
+  });
+  ipcMain.handle('folder:parent', async (event, current: string) => {
+    const id = windowIdOf(event), root = folders.get(id);
+    if (!root || root !== current) return null;
+    const parent = path.dirname(root);
+    return parent === root ? null : selectFolder(id, parent, beginFolderNavigation(id));
   });
   ipcMain.handle('folder:list', async (event, directory: string) => folderEntries(await checkFolder(windowIdOf(event), directory)));
-  handle('folder:file', async (id, file: string) => openFile(id, await checkFolder(id, file)));
+  handle('folder:file', async (id, file: string) => openFile(id, await checkFolderFile(id, file)));
+  handle('document:rename', async (windowId, reference: DocumentReference, name: string) => {
+    if ('id' in reference) await store.renameDocument(windowId, reference.id, name);
+    else await store.renameFolderFile(windowId, await checkFolderFile(windowId, reference.path), name);
+    await store.persist();
+  });
+  handle('document:reveal', async (windowId, reference: DocumentReference) => {
+    const file = 'id' in reference ? store.accessibleDocument(windowId, reference.id).path : await checkFolderFile(windowId, reference.path);
+    if (!file || !(await fs.stat(file).catch(() => null))?.isFile()) throw new Error('找不到磁盘上的原文件');
+    shell.showItemInFolder(file);
+  });
+  handle('folder:file-save-as', async (windowId, file: string) => {
+    const source = await checkFolderFile(windowId, file);
+    const target = await saveAs(windowId, source);
+    await store.saveFolderFileCopy(await checkFolderFile(windowId, file), target);
+    await store.persist();
+  });
   ipcMain.handle('image:insert', async (event, id: string, data?: { bytes: number[]; name: string }) => {
     try {
       const owner = windowIdOf(event); requireOwned(owner, id); const doc = store.documents.get(id)!;

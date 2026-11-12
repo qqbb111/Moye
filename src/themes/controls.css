@@ -168,6 +168,9 @@ dialog input[type=number], dialog select { border-radius: 6px; }
 :root { --ui-accent: #487c68; --ui-accent-soft: #dce9e0; accent-color: var(--ui-accent); }
 :root[data-theme='dark'], :root[data-theme='copilot'], :root[data-theme='workbuddy'] { --ui-accent: #afd1bf; --ui-accent-soft: #2d3933; }
 ::selection { background-color: var(--selection); }
+#app, dialog, [popover] { user-select: none; }
+.cm-content, textarea, input:not([type='checkbox'], [type='radio'], [type='range'], [type='button']) { user-select: text; }
+button, .code-toolbar, .table-toolbar { user-select: none; }
 :root :is(button, input, select, textarea, summary, a[href], [tabindex]):where(:not(dialog)):focus-visible,
 #print-pages:focus-visible {
   outline: 1px solid var(--ui-accent);
@@ -317,7 +320,17 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .sidebar-filter { border-color: var(--border); background: color-mix(in srgb, var(--bg) 60%, transparent); }
 #sidebar-filter { font-size: 12px; }
 .sidebar-row { min-height: 34px; transition: background-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease; }
-.sidebar-folder-action { margin-top: 12px; color: var(--ui-accent); border: 1px solid var(--border); justify-content: center; }
+#sidebar-open-folder { flex: none; border-radius: 0; }
+.sidebar-row.pending-activation { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.folder-heading { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#rename-document h2 { margin-bottom: 14px; }
+#rename-name {
+  width: 100%; height: 38px; padding: 0 11px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+#rename-error { margin: 8px 0 0; color: var(--error, #bc5450); }
+#rename-document button[type="submit"] { background: var(--ui-accent-soft); color: var(--ui-accent); border-color: transparent; }
+#rename-document button[type="submit"]:not(:disabled):hover { border-color: var(--ui-accent); }
 .sidebar-heading { min-height: 44px; padding: 14px 18px 6px; }
 #quick-open { padding: 10px; border-radius: 10px; }
 .quick-search { display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 1px solid var(--ui-accent); border-radius: var(--ui-radius); background: var(--surface); }

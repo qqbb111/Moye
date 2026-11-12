@@ -5,6 +5,7 @@ export const COMMANDS: Command[] = [
   command('new', '新建文档', '文件', ['Ctrl+N']), command('new-window', '新建窗口', '文件', ['Ctrl+Shift+N']),
   command('open', '打开文件', '文件', ['Ctrl+O']), command('folder', '打开文件夹', '文件'), command('quick-open', '快速打开', '文件', ['Ctrl+P']),
   command('auto-save', '自动保存开关', '文件'), command('save', '保存', '文件', ['Ctrl+S']), command('save-as', '另存为', '文件', ['Ctrl+Shift+S']),
+  command('rename', '重命名', '文件', ['F2']),
   command('export-pdf', '导出 PDF', '文件'), command('export-html', '导出 HTML', '文件'), command('detach', '移到新窗口', '文件'), command('close-tab', '关闭文档', '文件', ['Ctrl+W']),
   command('undo', '撤销', '编辑', ['Ctrl+Z'], true), command('redo', '重做', '编辑', ['Ctrl+Shift+Z', 'Ctrl+Y'], true),
   command('cut', '剪切', '编辑', ['Ctrl+X'], true), command('copy', '复制', '编辑', ['Ctrl+C'], true), command('paste', '粘贴', '编辑', ['Ctrl+V'], true), command('select-all', '全选', '编辑', ['Ctrl+A'], true),
@@ -47,7 +48,14 @@ export function validateShortcuts(value: unknown): ShortcutOverrides {
   for (const c of COMMANDS) for (const key of commandKeys(c.id, result)) { const conflict = shortcutConflict(c.id, key, result); if (conflict) throw new Error(`与「${conflict.label}」的 ${key} 冲突`); }
   return result;
 }
-export function restoredShortcuts(value: unknown): ShortcutOverrides { try { return validateShortcuts(value ?? {}); } catch { return {}; } }
+export function restoredShortcuts(value: unknown): ShortcutOverrides {
+  try {
+    const saved = value ?? {};
+    // Existing custom F2 bindings take precedence over the newly added default.
+    const migrated = typeof saved === 'object' && !Array.isArray(saved) && !Object.hasOwn(saved, 'rename') && Object.values(saved).includes('F2') ? { ...saved, rename: '' } : saved;
+    return validateShortcuts(migrated);
+  } catch { return {}; }
+}
 export function shortcutFromEvent(event: Pick<KeyboardEvent, 'code' | 'key' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>): string | null {
   const codes: Record<string, string> = { Equal: '=', Minus: '-', BracketLeft: '[', BracketRight: ']', Backquote: '`', Slash: '/', Backslash: '\\', Comma: ',', Period: '.', Semicolon: ';', Quote: "'", Space: 'Space' };
   const key = codes[event.code] ?? (/^Key[A-Z]$/.test(event.code) ? event.code.slice(3) : /^Digit\d$/.test(event.code) ? event.code.slice(5) : event.key.length === 1 ? event.key.toUpperCase() : event.key);

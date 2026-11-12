@@ -3,7 +3,7 @@ import workerURL from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import './themes/print-preview.css';
 import { printHTML } from './print-export';
 import { icon } from './icons';
-import { printPreferences, optionsFromPreferences, type PrintOptions, type PrintPreferences, type PrintLayout } from '../shared/print';
+import { printPrefix, printPreferences, optionsFromPreferences, type PrintOptions, type PrintPreferences, type PrintLayout } from '../shared/print';
 import type { DocumentView } from '../shared/types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerURL;
@@ -22,8 +22,7 @@ export class PrintPreview {
   private observer?: IntersectionObserver;
   private renders = new Map<number, pdfjs.RenderTask>();
   private id = '';
-  private request?: { id: string; generation: number; documentId: string };
-  private interim?: Promise<unknown>;
+  private request?: { id: string; generation: number; documentId: string; abort: AbortController; final: boolean };
   private lastLayout: PrintLayout = 'portrait';
   constructor(private read: (id: string) => DocumentView | undefined, private media: (id: string, url: string) => string, private focus: () => void) {
     this.dialog.id = 'print-preview'; this.dialog.setAttribute('aria-label', '打印预览'); this.dialog.tabIndex = -1;
@@ -33,10 +32,10 @@ export class PrintPreview {
     document.body.append(this.dialog);
     window.rypota.onPdfFirstPage(page => {
       const request = this.request;
-      if (!request || page.requestId !== request.id || page.documentId !== request.documentId || request.generation !== this.generation || !this.dialog.open) return;
-      // The first page uses the very same print document and settings. Saving
-      // stays disabled until the complete PDF has replaced this initial view.
-      this.interim = this.displayPdf(page.bytes, request.generation).catch(() => false);
+      if (!request || request.final || page.requestId !== request.id || page.documentId !== request.documentId || request.generation !== this.generation || !this.dialog.open) return;
+      void this.displayPdf(page.bytes, request.generation).then(visible => {
+        if (visible && !request.final) this.get('#print-page-count').textContent = '首页预览';
+      }).catch(() => {});
     });
     this.get<HTMLButtonElement>('#print-close').onclick = () => this.dialog.close();
     this.get('#print-layout').onchange = () => {
@@ -66,6 +65,13 @@ export class PrintPreview {
   private options(): PrintOptions { return { layout: this.get<HTMLSelectElement>('#print-layout').value as PrintLayout, color: this.get<HTMLSelectElement>('#print-color').value as PrintOptions['color'], codeFontPt: Number(this.get<HTMLInputElement>('#print-font').value), lineNumbers: this.get<HTMLInputElement>('#print-lines').checked }; }
   private schedule(delay = 400) {
     clearTimeout(this.timer); const generation = ++this.generation; this.id = ''; delete this.dialog.dataset.previewId; this.get<HTMLButtonElement>('#print-save').disabled = true; this.get<HTMLSelectElement>('#print-zoom').disabled = true;
+    if (this.request) {
+      this.request.abort.abort();
+      this.request = undefined;
+      void window.rypota.releasePdf();
+    }
+    this.clearPdf();
+    this.get('#print-page-count').textContent = '';
     this.dialog.dataset.generation = String(generation);
     this.message(''); this.get('#print-busy').hidden = false; this.get('#print-save').textContent = '正在生成…';
     this.get('#print-pages').style.setProperty('--paper-aspect', this.options().layout === 'portrait' ? '210 / 297' : '297 / 210');
@@ -76,22 +82,30 @@ export class PrintPreview {
   }
   private async generate(generation: number) {
     const options = this.options(), snapshot = this.snapshot;
+    const request = { id: crypto.randomUUID(), generation, documentId: snapshot.id, abort: new AbortController(), final: false };
+    const signal = request.abort.signal;
+    this.request = request;
     try {
       const source = JSON.stringify([snapshot.id, snapshot.title, snapshot.path, snapshot.content]);
       if (source !== this.preparedSource) { this.prepared.clear(); this.preparedSource = source; }
       const key = JSON.stringify(options);
       let html = this.prepared.get(key);
       if (!html) {
-        html = await printHTML(snapshot.content, snapshot.title, { id: snapshot.id, media: url => this.media(snapshot.id, url), link: () => {}, changed: () => {} }, options);
+        const host = { id: snapshot.id, media: (url: string) => this.media(snapshot.id, url), link: () => {}, changed: () => {} };
+        const prefix = printPrefix(snapshot.content);
+        if (prefix?.trim()) {
+          void printHTML(prefix, snapshot.title, host, options, signal).then(first => {
+            if (!signal.aborted && !request.final) return window.rypota.previewPdfFirstPage(snapshot.id, first, options, request.id);
+          }).catch(() => {});
+        }
+        html = await printHTML(snapshot.content, snapshot.title, host, options, signal);
         if (source === this.preparedSource && html.length <= 2 * 1024 * 1024) { this.prepared.set(key, html); if (this.prepared.size > 4) this.prepared.delete(this.prepared.keys().next().value!); }
       }
       if (generation !== this.generation || !this.dialog.open) return;
-      const request = { id: crypto.randomUUID(), generation, documentId: snapshot.id }; this.request = request; this.interim = undefined;
       const result = await window.rypota.previewPdf(snapshot.id, html, options, request.id);
       if (generation !== this.generation || !this.dialog.open) return;
+      request.final = true;
       if (!result.ok) { if (!result.canceled) throw new Error(result.message ?? '无法生成 PDF'); return; }
-      await this.interim;
-      if (generation !== this.generation || !this.dialog.open) return;
       if (await this.displayPdf(result.bytes, generation)) {
         this.id = result.previewId; this.dialog.dataset.previewId = this.id; this.get('#print-page-count').textContent = `${this.pdf!.numPages} 页`;
         this.finishBusy(); this.get<HTMLButtonElement>('#print-save').disabled = false; this.get<HTMLSelectElement>('#print-zoom').disabled = false;
@@ -103,11 +117,11 @@ export class PrintPreview {
     this.clearPdf(true);
     const loading = pdfjs.getDocument({ data: new Uint8Array(bytes), worker: this.worker }); this.loading = loading;
     const pdf = await loading.promise;
-    if (generation !== this.generation || !this.dialog.open) { await loading.destroy(); return false; }
+    if (this.loading !== loading || generation !== this.generation || !this.dialog.open) { await loading.destroy(); return false; }
     this.pdf = pdf; return await this.paintPages() && generation === this.generation && this.dialog.open;
   }
   private finishBusy() { this.get('#print-busy').hidden = true; this.get('#print-save').textContent = '保存 PDF…'; }
-  private dispose() { this.generation++; clearTimeout(this.timer); this.clearPdf(); this.worker?.destroy(); this.worker = undefined; this.request = undefined; this.interim = undefined; this.id = ''; delete this.dialog.dataset.previewId; void window.rypota.releasePdf(); }
+  private dispose() { this.generation++; clearTimeout(this.timer); this.request?.abort.abort(); this.clearPdf(); this.worker?.destroy(); this.worker = undefined; this.request = undefined; this.id = ''; delete this.dialog.dataset.previewId; void window.rypota.releasePdf(); }
   private clearPdf(preservePages = false) {
     this.paintGeneration++;
     this.observer?.disconnect(); for (const task of this.renders.values()) task.cancel(); this.renders.clear();

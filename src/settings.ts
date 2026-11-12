@@ -2,6 +2,7 @@ import { COMMANDS, commandKeys, normalizeShortcut, shortcutConflict, shortcutFro
 import type { WorkspaceView, ActionResult, UpdateAction, UpdateState } from '../shared/types';
 import { icon } from './icons';
 import { APP_NAME, THEMES } from '../shared/branding';
+import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { version } from '../package.json';
 import './themes/settings.css';
 
@@ -30,7 +31,7 @@ export class Settings {
       <section id="settings-panel" role="tabpanel" tabindex="0">
         <div id="settings-general">
           <div class="setting-row"><label for="theme-select">主题</label><select id="theme-select">${THEMES.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></div>
-          <div class="setting-row"><label for="code-theme-select">代码配色</label><div class="setting-control"><select id="code-theme-select"><option value="github-dark">GitHub Dark</option><option value="modern-dark">现代深色</option><option value="vscode">跟随本机 VS Code</option></select><button type="button" id="code-theme-refresh" aria-label="重新读取 VS Code 配色" title="重新读取 VS Code 配色" hidden>${icon('refresh')}</button></div></div><p id="code-theme-status" role="status" hidden></p>
+          <div class="setting-row"><label for="code-theme-select">代码配色</label><div class="setting-control"><select id="code-theme-select">${Object.entries(BUILTIN_CODE_THEMES).map(([value, theme]) => `<option value="${value}">${theme.name}</option>`).join('')}<option value="vscode">跟随本机 VS Code</option></select><button type="button" id="code-theme-refresh" aria-label="重新读取 VS Code 配色" title="重新读取 VS Code 配色" hidden>${icon('refresh')}</button></div></div><p id="code-theme-status" role="status" hidden></p>
           <div class="setting-row"><label for="font-size">正文字号</label><input id="font-size" type="number" min="14" max="24"></div>
           <div class="setting-row"><label for="reading-width-select">阅读宽度</label><select id="reading-width-select"><option value="720">紧凑 · 720</option><option value="900">适中 · 900</option><option value="1080">宽阔 · 1080</option></select></div>
           <div class="setting-row"><label for="code-wrap-toggle">代码自动换行</label><input id="code-wrap-toggle" type="checkbox" role="switch"></div>

@@ -16,8 +16,8 @@ import { icon, type IconName } from './icons';
 import { textEdits, toggleMarkup, tidyChineseMarkdown } from '../shared/markdown-tools';
 
 const sourceEffect = StateEffect.define<boolean>();
-const quoteCompositionEffect = StateEffect.define<boolean>();
-const quoteCompositionField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(quoteCompositionEffect)) value = effect.value; return value; } });
+const compositionEffect = StateEffect.define<boolean>();
+const compositionField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(compositionEffect)) value = effect.value; return value; } });
 const emoji: Record<string, string> = { smile: '😄', smiling: '😊', grin: '😁', laughing: '😆', joy: '😂', heart: '❤️', blush: '😊', wink: '😉', cry: '😢', sob: '😭', angry: '😠', thinking: '🤔', thinking_face: '🤔', sunglasses: '😎', star: '⭐', sparkles: '✨', fire: '🔥', rocket: '🚀', tada: '🎉', warning: '⚠️', check: '✅', white_check_mark: '✅', x: '❌', thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎', clap: '👏', pray: '🙏', eyes: '👀', memo: '📝', book: '📖', bulb: '💡', computer: '💻', bug: '🐛', coffee: '☕', apple: '🍎', penguin: '🐧', cat: '🐱', dog: '🐶', flag_cn: '🇨🇳', cn: '🇨🇳', ok_hand: '👌', muscle: '💪', 100: '💯' };
 function completeEmoji(context: CompletionContext) {
   const match = context.matchBefore(/:[a-z_0-9+-]*/); if (!match || (!context.explicit && match.text.length < 2)) return null;
@@ -384,7 +384,7 @@ function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): 
   walk(ast, node => {
     if (node.type === 'definition') definitions.set(node.identifier!, node.url!);
     if (node.type === 'footnoteDefinition') footnotes.set(node.identifier!, plainText(node));
-    if (node.type === 'list' && node.ordered) { const start = node.start ?? 1; const width = `${Math.max(String(start).length, String(start + (node.children?.length ?? 1) - 1).length) + 2}ch`; node.children?.forEach((item, index) => orderedMarkers.set(item, { number: start + index, width })); }
+    if (node.type === 'list' && node.ordered) { const start = node.start ?? 1; const width = `${Math.max(String(start).length, String(start + (node.children?.length ?? 1) - 1).length) + 1}ch`; node.children?.forEach((item, index) => orderedMarkers.set(item, { number: start + index, width })); }
   });
   const selection = state.selection.main;
   const active = (from: number, to: number) => selection.empty ? selection.head >= from && selection.head <= to : selection.from < to && selection.to > from;
@@ -407,9 +407,14 @@ function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): 
     if (node.type === 'paragraph' && /^\[toc\]$/i.test(raw.trim()) && block(node, 'toc')) return;
     if (node.type === 'image' && parent?.type === 'paragraph' && parent.children?.length === 1) { block(node, 'image', true); return; }
     if (node.type === 'heading') {
-      line(from, `md-heading md-h${node.depth}`); const prefix = /^#{1,6}\s+/.exec(raw);
-      if (prefix) hide(from, from + prefix[0].length);
-      const suffix = /\s+#+\s*$/.exec(raw); if (suffix) hide(to - suffix[0].length, to);
+      line(from, `md-heading md-h${node.depth}`);
+      const row = state.doc.lineAt(from);
+      const showMarkers = parent?.type === 'listItem' && state.doc.lineAt(startOf(parent)).number === row.number && active(row.from, row.to);
+      const prefix = /^#{1,6}(?:[ \t]+|$)/.exec(raw);
+      const suffix = /[ \t]+#+[ \t]*$/.exec(raw);
+      const headingMarker = (start: number, end: number) => showMarkers ? mark(start, end, 'md-heading-marker') : hide(start, end);
+      if (prefix) headingMarker(from, from + prefix[0].length);
+      if (suffix && suffix.index >= (prefix?.[0].length ?? 0)) headingMarker(to - suffix[0].length, to);
       if (!prefix) { const newline = raw.indexOf('\n'); if (newline >= 0) hide(from + newline, to); }
     }
     if (node.type === 'blockquote') {
@@ -418,11 +423,13 @@ function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): 
     if (node.type === 'listItem') {
       const row = state.doc.lineAt(from); const ordered = orderedMarkers.get(node);
       line(from, (node.checked !== null && node.checked !== undefined ? 'md-task' : 'md-list') + (ordered && from === row.from ? ' md-ordered-hanging' : ''), ordered ? { style: `--list-marker-width:${ordered.width}` } : undefined);
-      const prefix = /^(\s*)(?:[-+*]|\d+[.)])\s+/.exec(raw);
+      const prefix = /^([ \t]*)([-+*]|\d+[.)])[ \t]+/.exec(raw);
       if (prefix && ordered) {
-        const delimiter = /^\s*\d+([.)])/.exec(prefix[0])?.[1] ?? '.'; const label = `${ordered.number}${delimiter}`;
-        // Retain the real source text in the editable DOM for IME/clipboard offsets.
-        mark(from + prefix[1].length, from + prefix[0].length, 'md-list-number', { 'data-list-marker': label, 'aria-label': label });
+        const markerFrom = from + prefix[1].length;
+        const label = `${ordered.number}${prefix[2].slice(-1)}`;
+        // Keep the separator in visible text so Chromium cannot attach preedit
+        // at the start of the body to the hidden source number.
+        mark(markerFrom, markerFrom + prefix[2].length, 'md-list-number', { 'data-list-marker': label, 'aria-label': label });
       }
       if (prefix && !active(row.from, row.to)) {
         if (node.checked !== null && node.checked !== undefined) {
@@ -560,12 +567,12 @@ export class MarkdownEditor {
     const finishComposition = (view: EditorView, sequence: number) => { requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!view.dom.isConnected || sequence !== compositionSequence) return;
       if (view.compositionStarted) { finishComposition(view, sequence); return; }
-      if (view.state.field(quoteCompositionField)) { view.dispatch({ effects: quoteCompositionEffect.of(false) }); host.changed(view.state.doc.toString()); }
+      if (view.state.field(compositionField)) { view.dispatch({ effects: compositionEffect.of(false) }); host.changed(view.state.doc.toString()); }
     })); };
     const preview = StateField.define<{ ast: MarkdownNode; decorations: DecorationSet }>({
       create(state) { const ast = parseMarkdown(state.doc.toString()); return { ast, decorations: previewDecorations(state, ast, host) }; },
-      update(value, transaction) { if (transaction.state.field(quoteCompositionField)) return { ast: value.ast, decorations: value.decorations.map(transaction.changes) };
-        const ast = transaction.docChanged || transaction.startState.field(quoteCompositionField) ? parseMarkdown(transaction.state.doc.toString()) : value.ast;
+      update(value, transaction) { if (transaction.state.field(compositionField)) return { ast: value.ast, decorations: value.decorations.map(transaction.changes) };
+        const ast = transaction.docChanged || transaction.startState.field(compositionField) ? parseMarkdown(transaction.state.doc.toString()) : value.ast;
         if (transaction.docChanged || transaction.selection || transaction.effects.length) return { ast, decorations: previewDecorations(transaction.state, ast, host) }; return value; },
       provide: field => EditorView.decorations.from(field, value => value.decorations),
     });
@@ -577,15 +584,15 @@ export class MarkdownEditor {
       return false;
     } });
     bindings.push({ key: 'Delete', run: view => deleteParagraphBoundary(view, false), preventDefault: false });
-    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, quoteCompositionField, preview, history(), drawSelection(), dropCursor(), rectangularSelection(), highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
-      EditorView.updateListener.of(update => { if (update.docChanged) host.changed(update.state.doc.toString()); }),
+    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, preview, history(), drawSelection(), dropCursor(), rectangularSelection(), highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
+      EditorView.updateListener.of(update => { if (update.docChanged && !update.state.field(compositionField)) host.changed(update.state.doc.toString()); }),
       EditorView.domEventHandlers({
-        compositionstart(_event, view) { if (view.hasFocus && !view.state.field(sourceField) && /^\s*>/.test(view.state.doc.lineAt(view.state.selection.main.head).text)) { compositionSequence++; view.dispatch({ effects: quoteCompositionEffect.of(true) }); } return false; },
-        compositionend(_event, view) { if (view.state.field(quoteCompositionField)) finishComposition(view, compositionSequence); return false; },
+        compositionstart(event, view) { if (event.isTrusted && view.hasFocus) { compositionSequence++; view.dispatch({ effects: compositionEffect.of(true) }); } return false; },
+        compositionend(_event, view) { if (view.state.field(compositionField)) finishComposition(view, compositionSequence); return false; },
         click(event) { const target = (event.target as HTMLElement).closest<HTMLElement>('[data-href]'); if (target && (event.ctrlKey || event.metaKey)) { event.preventDefault(); host.link(target.dataset.href!); return true; } return false; }
       }),
       EditorView.inputHandler.of((view, from, to, text) => {
-        if (view.composing || text.length !== 1) return false;
+        if (view.compositionStarted || view.state.field(compositionField) || text.length !== 1) return false;
         if (text === '=' && from !== to) return host.highlightWithEquals?.() !== false ? highlightSelection(view) : false;
         const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`', '*': '*', '~': '~', '=': '=', '^': '^' };
         const next = view.state.sliceDoc(to, to + 1); if (from === to && /[)\]}"'`]/.test(text) && next === text) { view.dispatch({ selection: { anchor: to + 1 } }); return true; }
@@ -694,7 +701,7 @@ export class MarkdownEditor {
     }
   }
 
-  replace(content: string) { if (this.view.compositionStarted && this.view.state.field(quoteCompositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }
+  replace(content: string) { if (this.view.state.field(compositionField)) return; if (content !== this.content) this.view.dispatch({ changes: textEdits(this.content, content), annotations: isolateHistory.of('full') }); }
   insertImage(url: string, alt = '图片') { const label = alt.replace(/[\[\]\\\r\n]/g, ' '); const markdown = `![${label}](${url})`; insertBlock(this.view, markdown, markdown.length + 2); }
   action(action: string) { return editorAction(this.view, action); }
   highlightSelection() { return highlightSelection(this.view); }

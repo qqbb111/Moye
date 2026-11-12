@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { DocumentView, WorkspaceView } from '../shared/types';
 import { tidyChineseMarkdown, applyEdits } from '../shared/markdown-tools';
 import { printPreferences } from '../shared/print';
+import { isCodeThemePreference } from '../shared/code-theme';
 import { ImageAttachments } from './images';
 
 interface DocumentRecord extends DocumentView {
@@ -20,6 +21,35 @@ export class FileConflictError extends Error { constructor(message = '文件已�
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+const documentExtension = /\.(?:md|markdown|mdown|mkd|txt)$/i;
+function validDocumentName(input: string) {
+  if (typeof input !== 'string') throw new Error('请输入有效的文件名');
+  const name = input.trim();
+  if (!name || name.length > 255 || /[<>:"/\\|?*\x00-\x1f]/u.test(name) || name.endsWith('.') || /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(name)) throw new Error('请输入有效的文件名');
+  return name;
+}
+async function renameWithoutOverwrite(source: string, target: string) {
+  const original = await fs.lstat(source);
+  if (!original.isFile()) throw new Error('请选择 Markdown 或文本文件');
+  if (pathKey(source) === pathKey(target)) {
+    const existing = await fs.lstat(target).catch(error => { if (!missing(error)) throw error; });
+    if (existing && (existing.ino !== original.ino || existing.dev !== original.dev)) throw new Error('同名文件已存在');
+    await fs.rename(source, target);
+    return;
+  }
+  const reservation = await fs.open(target, 'wx').catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('同名文件已存在');
+    throw error;
+  });
+  const reserved = await reservation.stat().finally(() => reservation.close());
+  try {
+    await fs.rename(source, target);
+  } catch (error) {
+    const remaining = await fs.lstat(target).catch(() => null);
+    if (remaining?.ino === reserved.ino && remaining.dev === reserved.dev) await fs.unlink(target).catch(() => {});
+    throw error;
+  }
+}
 export async function atomicWrite(target: string, contents: Buffer | string) {
   const temporary = path.join(path.dirname(target), `.${path.basename(target)}.rypota-${randomUUID()}.tmp`);
   let handle;
@@ -80,7 +110,10 @@ export class DocumentStore {
     this.recovered = true;
     const restored = { ...snapshot.preferences } as WorkspaceView['preferences'] & { focus?: unknown; typewriter?: unknown };
     delete restored.focus; delete restored.typewriter;
-    this.preferences = { ...this.preferences, ...restored, shortcuts: restoredShortcuts(restored.shortcuts) };
+    this.preferences = {
+      ...this.preferences, ...restored, shortcuts: restoredShortcuts(restored.shortcuts),
+      codeTheme: isCodeThemePreference(restored.codeTheme) ? restored.codeTheme : this.preferences.codeTheme,
+    };
     const migrateAppearance = (snapshot.preferences?.appearanceRevision ?? 0) < 1;
     if (migrateAppearance) Object.assign(this.preferences, { theme: 'workbuddy', codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, appearanceRevision: 1 });
     let migratedImages = false;
@@ -136,9 +169,9 @@ export class DocumentStore {
   findByPath(file: string) { return [...this.documents.values()].find(doc => doc.path && pathKey(doc.path) === pathKey(file)); }
   async refreshFromDisk(id: string) {
     const document = this.documents.get(id); if (!document?.path || document.dirty || document.status === 'saving') return;
-    const revision = document.revision; const bytes = await fs.readFile(document.path);
+    const { path: file, revision } = document; const bytes = await fs.readFile(file);
     const latest = this.documents.get(id);
-    if (latest !== document || latest.revision !== revision || latest.dirty || latest.status === 'saving' || hash(bytes) === latest.diskHash) return;
+    if (latest !== document || latest.path !== file || latest.revision !== revision || latest.dirty || latest.status === 'saving' || hash(bytes) === latest.diskHash) return;
     const decoded = decode(bytes); Object.assign(document, decoded, { savedContent: decoded.content, diskHash: hash(bytes), revision: revision + 1, savedRevision: revision + 1, updatedAt: Date.now(), savedAt: Date.now(), status: 'saved', error: null }); this.changed();
   }
   owner(id: string) { return [...this.windows.values()].find(window => window.documentIds.includes(id))?.id; }
@@ -161,9 +194,14 @@ export class DocumentStore {
     }
     this.changed();
   }
-  async save(id: string, destination?: string, overwrite = false) {
+  private async writeDocument(id: string, operation: () => Promise<void>) {
     const preceding = this.writes.get(id) ?? Promise.resolve();
-    const task = preceding.catch(() => {}).then(async () => {
+    const task = preceding.catch(() => {}).then(operation);
+    this.writes.set(id, task);
+    try { await task; } finally { if (this.writes.get(id) === task) this.writes.delete(id); }
+  }
+  async save(id: string, destination?: string, overwrite = false) {
+    await this.writeDocument(id, async () => {
       const document = this.documents.get(id); if (!document) throw new Error('文档已关闭');
       const target = destination ? path.resolve(destination) : document.path;
       if (!target) throw new Error('请先选择保存位置');
@@ -195,8 +233,47 @@ export class DocumentStore {
         this.changed(); throw error;
       }
     });
-    this.writes.set(id, task);
-    try { await task; } finally { if (this.writes.get(id) === task) this.writes.delete(id); }
+  }
+  accessibleDocument(windowId: string, id: string) {
+    this.requireWindow(windowId);
+    const document = this.documents.get(id), owner = this.owner(id);
+    if (!document || (owner !== windowId && (owner || !document.dirty))) throw new Error('找不到当前窗口中的文档或草稿');
+    return document;
+  }
+  async renameDocument(windowId: string, id: string, title: string) {
+    const name = validDocumentName(title);
+    await this.writeDocument(id, async () => {
+      const document = this.accessibleDocument(windowId, id);
+      if (document.path) await this.renameFileOnDisk(document.path, name, document);
+      else if (document.title !== name) { document.title = name; this.changed(); }
+    });
+  }
+  async renameFolderFile(windowId: string, file: string, title: string) {
+    const document = this.findByPath(file);
+    if (document) return this.renameDocument(windowId, document.id, title);
+    await this.renameFileOnDisk(file, validDocumentName(title));
+  }
+  private async renameFileOnDisk(file: string, name: string, document?: DocumentRecord) {
+    const filename = documentExtension.test(name) ? name : name + path.extname(file);
+    const target = path.join(path.dirname(file), validDocumentName(filename));
+    if (file === target) return;
+    const duplicate = this.findByPath(target);
+    if (duplicate && duplicate !== document) throw new Error('同名文件已在墨页中打开');
+    await renameWithoutOverwrite(file, target);
+    if (document) { document.path = target; document.title = filename; }
+    this.recent = this.recent.map(item => pathKey(item) === pathKey(file) ? target : item);
+    this.changed();
+  }
+  async saveFolderFileCopy(file: string, destination: string) {
+    const target = path.resolve(destination);
+    if (pathKey(file) === pathKey(target)) throw new Error('请选择不同的保存位置');
+    if (this.findByPath(target)) throw new Error('这个文件已在其他标签页打开，请选择不同的保存位置。');
+    const { content, eol, bom } = decode(await fs.readFile(file));
+    const materialized = await this.images.materialize(content, target, file);
+    const output = (bom ? '\uFEFF' : '') + materialized.replace(/\n/g, eol);
+    await atomicWrite(target, output);
+    this.touchRecent(target);
+    this.changed();
   }
   async organizeImages(windowId: string, id: string) {
     const document = this.requireDocument(windowId, id); const original = document.content; const revision = document.revision;
@@ -242,7 +319,7 @@ export class DocumentStore {
       const value = preferences[key]; if (typeof value === 'number' && Number.isFinite(value)) this.preferences[key] = Math.round(Math.max(minimum, Math.min(maximum, value)));
     }
     if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot' || preferences.theme === 'workbuddy') this.preferences.theme = preferences.theme;
-    if (preferences.codeTheme === 'modern-dark' || preferences.codeTheme === 'vscode' || preferences.codeTheme === 'github-dark') this.preferences.codeTheme = preferences.codeTheme;
+    if (isCodeThemePreference(preferences.codeTheme)) this.preferences.codeTheme = preferences.codeTheme;
     if (typeof preferences.fontSize === 'number' && Number.isFinite(preferences.fontSize)) this.preferences.fontSize = Math.max(14, Math.min(24, preferences.fontSize));
     for (const key of ['sidebar', 'tabs'] as const) if (typeof preferences[key] === 'boolean') this.preferences[key] = preferences[key];
     if (!this.preferences.autoSave) { for (const timer of this.autoTimers.values()) clearTimeout(timer); this.autoTimers.clear(); }
