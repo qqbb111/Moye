@@ -2,16 +2,46 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import electronPath from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const root = process.cwd();
+const workspaces = new Set<string>();
+const applications = new Set<ElectronApplication>();
+async function testDirectory() {
+  const staging = path.join(await fs.realpath(root), '.test-data');
+  await fs.mkdir(staging, { recursive: true });
+  if (await fs.realpath(staging) !== staging) throw new Error('测试暂存路径必须位于项目中');
+  const directory = await fs.mkdtemp(path.join(staging, 'desktop-'));
+  workspaces.add(directory);
+  return directory;
+}
+test.afterEach(async () => {
+  const closed = await Promise.allSettled([...applications].map(async application => {
+    const child = application.process();
+    if (child.exitCode === null && child.signalCode === null) await application.close();
+  }));
+  const removed = await Promise.allSettled([...workspaces].map(async directory => {
+    const resolved = await fs.realpath(directory).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    if (!resolved) return;
+    if (resolved !== directory) throw new Error('测试暂存路径发生变化');
+    await fs.rm(resolved, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }));
+  workspaces.clear();
+  applications.clear();
+  const failures = [...closed, ...removed].flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+  if (failures.length) throw new AggregateError(failures, '测试暂存清理失败');
+});
+
 async function launch(profile?: string, extraEnv: NodeJS.ProcessEnv = {}) {
-  const directory = path.join(root, '.test-data', randomUUID()); await fs.mkdir(directory, { recursive: true }); profile ??= path.join(directory, 'profile');
+  const directory = await testDirectory(); profile ??= path.join(directory, 'profile');
   const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv, TYPORA_REPLICA_USER_DATA: profile, TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
   const executablePath = process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string;
   const application = await electron.launch({ executablePath, args: process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.'], cwd: root, env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) });
+  applications.add(application);
+  application.once('close', () => applications.delete(application));
   const page = await application.firstWindow(); await page.locator('.editor-slot:not([hidden]) .markdown-editor').waitFor();
   return { application, page, directory, profile };
 }
@@ -1369,7 +1399,7 @@ test('现代深色语法颜色与图标复制，修改代码语言后立即重�
 });
 
 test('跟随 VS Code 设置实时更新颜色，重启后继续同步且保留代码', async () => {
-  const directory = path.join(root, '.test-data', `theme-${randomUUID()}`); const themes = path.join(directory, 'extensions/theme-defaults/themes'); await fs.mkdir(themes, { recursive: true });
+  const directory = await testDirectory(); const themes = path.join(directory, 'extensions/theme-defaults/themes'); await fs.mkdir(themes, { recursive: true });
   await fs.writeFile(path.join(themes, 'dark_modern.json'), JSON.stringify({ colors: { 'editor.background': '#121314' }, tokenColors: [{ scope: 'comment', settings: { foreground: '#123456' } }] }));
   const settings = path.join(directory, 'settings.json'); await fs.writeFile(settings, '{ // test user settings\n "workbench.colorTheme": "Default Dark Modern", }');
   const env = { TYPORA_REPLICA_VSCODE_ROOT: directory, TYPORA_REPLICA_VSCODE_SETTINGS: settings }; let app = await launch(undefined, env);
