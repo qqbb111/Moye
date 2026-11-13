@@ -608,6 +608,7 @@ function smartEnter(view: EditorView): boolean {
 }
 export class MarkdownEditor {
   readonly view: EditorView;
+  private readonly preview: StateField<{ ast: MarkdownNode; decorations: DecorationSet }>;
   private modeViewport?: { doc: EditorState['doc']; origin: ViewportAnchor; destinationTop: number | null };
   constructor(parent: HTMLElement, content: string, readonly host: Host) {
     let compositionSequence = 0;
@@ -623,6 +624,7 @@ export class MarkdownEditor {
         if (transaction.docChanged || transaction.selection || transaction.effects.length) return { ast, decorations: previewDecorations(transaction.state, ast, host) }; return value; },
       provide: field => EditorView.decorations.from(field, value => value.decorations),
     });
+    this.preview = preview;
     const keepCursorInListBody = EditorState.transactionFilter.of(transaction => {
       const selection = transaction.selection;
       if (!selection || transaction.startState.field(sourceField) || transaction.effects.some(effect => effect.is(sourceEffect))) return transaction;
@@ -701,6 +703,10 @@ export class MarkdownEditor {
     this.view.dispatch({ effects: StateEffect.appendConfig.of([autocompletion({ override: [completeEmoji] }), EditorState.phrases.of({ Find: '查找', Replace: '替换', next: '下一处', previous: '上一处', all: '全部', 'match case': '区分大小写', regexp: '正则表达式', 'by word': '全词匹配', replace: '替换', 'replace all': '全部替换', close: '关闭' })]) });
   }
   get content() { return this.view.state.doc.toString(); }
+  get markdownTree() {
+    const state = this.view.state;
+    return state.field(compositionField) ? undefined : state.field(this.preview).ast;
+  }
   get source() { return this.view.state.field(sourceField); }
   setCodeWrap(enabled: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeWrap?.(enabled); }
   setCodeAppearance(workbuddy: boolean, githubDark: boolean) { for (const root of this.view.dom.querySelectorAll<HTMLElement>('.md-code')) (root as any).setCodeAppearance?.(workbuddy, githubDark); }

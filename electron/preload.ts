@@ -33,7 +33,7 @@ const bridge: RypotaBridge = {
   listFolder: path => ipcRenderer.invoke('folder:list', path),
   openFolderFile: path => ipcRenderer.invoke('folder:file', path),
   insertImage: (id, data) => ipcRenderer.invoke('image:insert', id, data),
-  exportDocument: (id, format, html) => ipcRenderer.invoke('document:export', id, format, html),
+  exportHtml: (id, html) => ipcRenderer.invoke('document:export-html', id, html),
   previewPdf: (id, html, options, requestId) => ipcRenderer.invoke('pdf:preview', id, html, options, requestId),
   previewPdfFirstPage: (id, html, options, requestId) => ipcRenderer.invoke('pdf:first-page-request', id, html, options, requestId),
   onPdfFirstPage: listener => subscribe('pdf:first-page', listener),
@@ -42,10 +42,11 @@ const bridge: RypotaBridge = {
   fullscreen: () => ipcRenderer.send('window:fullscreen'),
   paste: () => ipcRenderer.invoke('edit:paste'),
   clipboard: (action, text) => ipcRenderer.invoke('clipboard:text', action, text),
-  finishClose: token => ipcRenderer.send('window:ready-close', token),
+  finishClose: (token, prepared) => ipcRenderer.send('window:ready-close', token, prepared),
   onState: listener => subscribe('workspace:state', listener),
   onCommand: listener => subscribe('app:command', listener),
   onPrepareClose: listener => subscribe('window:prepare-close', listener),
+  onCancelClose: listener => subscribe('window:cancel-close', listener),
   onMessage: listener => subscribe('app:message', listener),
 };
 contextBridge.exposeInMainWorld('rypota', bridge);

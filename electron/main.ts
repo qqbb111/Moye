@@ -5,7 +5,8 @@ import { watch, type FSWatcher } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DocumentStore, FileConflictError, atomicWrite } from './store';
-import type { ActionResult, AppCommand, SaveMode, UpdateAction } from '../shared/types';
+import { readDocumentImage } from './images';
+import type { ActionResult, AppCommand, SaveMode, UpdateAction, WorkspaceUpdate } from '../shared/types';
 import type { DocumentReference } from '../shared/types';
 import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
@@ -26,10 +27,11 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'replica-media', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 const windows = new Map<string, BrowserWindow>();
+const deliveredRevisions = new Map<string, Map<string, number>>();
 const pdfPreviews = new PdfPreviews();
 const allowedClose = new Set<number>();
 const closing = new Set<number>();
-const pendingClose = new Map<string, { sender: number; resolve: () => void }>();
+const pendingClose = new Map<string, { sender: number; finish: (prepared: boolean) => void }>();
 const folders = new Map<string, string>();
 const folderNavigation = new Map<string, symbol>();
 const fileWatchers = new Map<string, { file: string; watcher: FSWatcher; timer?: ReturnType<typeof setTimeout> }>();
@@ -38,21 +40,32 @@ const devUrl = process.env.TYPORA_REPLICA_DEV_URL;
 const assetRoot = path.resolve(__dirname, '../dist');
 let quitting = false;
 let quitInProgress = false;
+let closingInOrder: Promise<void> = Promise.resolve();
 let updateRequest = (url: string, options: RequestInit) => net.fetch(url, options);
 const updates = new PortableUpdates({ version: app.getVersion(), executable: process.execPath, userData: app.getPath('userData'),
   supported: app.isPackaged && process.platform === 'win32' && process.arch === 'x64', request: (url, options) => updateRequest(url, options),
   changed: state => { for (const window of windows.values()) if (!window.isDestroyed()) window.webContents.send('update:state', state); },
 });
 const codeTheme = new VscodeThemeSync(() => publish());
-function workspaceView(id: string) {
+function workspaceChrome(id: string) {
   const theme = store.preferences.codeTheme ?? 'modern-dark';
-  return { ...store.view(id), maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: theme === 'vscode' ? codeTheme.current : BUILTIN_CODE_THEMES[theme] };
+  return { maximized: windows.get(id)?.isMaximized() ?? false, codeTheme: theme === 'vscode' ? codeTheme.current : BUILTIN_CODE_THEMES[theme] };
+}
+function rememberRevisions(id: string, view: Pick<WorkspaceUpdate, 'documents' | 'drafts'>) {
+  deliveredRevisions.set(id, new Map([...view.documents, ...view.drafts].map(doc => [doc.id, doc.revision])));
 }
 function newBlankWindow() { const id = store.newWindow(); store.newDocument(id); return createWindow(id); }
 function relaunchCommand() { return [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(value => `"${value}"`).join(' ') + ' --new-window'; }
 
-function publish() {
-  for (const [id, window] of windows) if (!window.isDestroyed() && store.windows.has(id)) window.webContents.send('workspace:state', workspaceView(id));
+function publish(edit?: Parameters<DocumentStore['onChanged']>[0]) {
+  if (edit) deliveredRevisions.get(edit.windowId)?.set(edit.documentId, edit.revision);
+  for (const [id, window] of windows) if (!window.isDestroyed() && store.windows.has(id)) {
+    const revisions = deliveredRevisions.get(id);
+    if (!revisions) continue;
+    const view = store.workspaceUpdate(id, revisions);
+    window.webContents.send('workspace:state', { ...view, ...workspaceChrome(id) });
+    rememberRevisions(id, view);
+  }
   for (const [id, item] of fileWatchers) if (!store.owner(id) || store.documents.get(id)?.path !== item.file) { item.watcher.close(); clearTimeout(item.timer); fileWatchers.delete(id); }
   for (const document of store.documents.values()) if (document.path && store.owner(document.id) && !fileWatchers.has(document.id)) {
     try {
@@ -74,20 +87,38 @@ function windowIdOf(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) 
   return entry[0];
 }
 function requireOwned(windowId: string, id: string) { if (typeof id !== 'string' || store.owner(id) !== windowId) throw new Error('找不到当前窗口中的文档'); }
-async function collectEdits(window: BrowserWindow, required = false) {
+async function collectEdits(window: BrowserWindow) {
   if (window.isDestroyed() || window.webContents.isCrashed()) return;
+  const entry = [...windows].find(([, candidate]) => candidate === window);
+  if (!entry || !deliveredRevisions.has(entry[0])) return;
   const token = randomUUID();
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => { pendingClose.delete(token); if (required) reject(new Error('窗口未确认草稿已保存')); else resolve(); }, 5000);
-    pendingClose.set(token, { sender: window.webContents.id, resolve: () => { clearTimeout(timer); pendingClose.delete(token); resolve(); } });
-    window.webContents.send('window:prepare-close', token);
+    const finish = (prepared: boolean) => {
+      clearTimeout(timer); pendingClose.delete(token);
+      if (prepared) resolve(); else reject(new Error('未能收集窗口中的最新编辑，请重试'));
+    };
+    const timer = setTimeout(() => finish(false), 5000);
+    pendingClose.set(token, { sender: window.webContents.id, finish });
+    try { window.webContents.send('window:prepare-close', token); } catch { finish(false); }
   });
+}
+function cancelClose(window: BrowserWindow) {
+  try { if (!window.isDestroyed() && !window.webContents.isCrashed()) window.webContents.send('window:cancel-close'); } catch {}
+}
+async function collectAndFlushWindows() {
+  await closingInOrder;
+  const results = await Promise.allSettled([...windows.values()].map(collectEdits));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
+  await store.flush();
 }
 function createWindow(id: string = store.newWindow()) {
   const window = new BrowserWindow({ width: 1320, height: 880, minWidth: 640, minHeight: 420, frame: false, show: false, backgroundColor: store.preferences.theme === 'light' ? '#fbfaf7' : '#1f1f1f', title: APP_NAME, icon: appIconPath, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: process.env.TYPORA_REPLICA_TEST !== '1' } });
   windows.set(id, window);
-  window.on('maximize', publish); window.on('unmaximize', publish);
+  window.on('closed', () => deliveredRevisions.delete(id));
+  window.webContents.on('did-start-loading', () => deliveredRevisions.delete(id));
+  window.on('maximize', () => publish()); window.on('unmaximize', () => publish());
   if (process.platform === 'win32') window.setAppDetails({ appId, appIconPath, appIconIndex: 0, relaunchCommand: relaunchCommand(), relaunchDisplayName: APP_NAME });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
@@ -97,16 +128,19 @@ function createWindow(id: string = store.newWindow()) {
   window.on('close', event => {
     if (allowedClose.has(window.id) || quitting) return;
     event.preventDefault();
-    if (closing.has(window.id)) return;
+    if (closing.has(window.id) || quitInProgress) return;
     closing.add(window.id);
-    void (async () => {
-      await collectEdits(window);
+    closingInOrder = closingInOrder.then(async () => {
       try {
+        await collectEdits(window);
         await store.flush();
-        if (windows.size > 1) { store.removeWindow(id); await store.persist(); }
+        if (windows.size > 1) await store.removeWindow(id);
         allowedClose.add(window.id); window.close();
-      } catch (error) { closing.delete(window.id); notify(window, `暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`); }
-    })();
+      } catch (error) {
+        closing.delete(window.id); cancelClose(window);
+        notify(window, `暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`);
+      }
+    });
   });
   window.on('closed', () => { pdfPreviews.dispose(id); windows.delete(id); folders.delete(id); folderNavigation.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
   window.webContents.on('render-process-gone', (_event, details) => { console.error('Renderer stopped:', details.reason); void store.persist().catch(() => {}); });
@@ -118,7 +152,7 @@ async function openFile(windowId: string, file: string) {
   if (!/\.(md|markdown|mdown|mkd|txt)$/i.test(file)) throw new Error('请选择 Markdown 或文本文件');
   const previousId = store.windows.get(windowId)?.activeId; const previous = previousId ? store.documents.get(previousId) : undefined;
   const result = await store.openFile(windowId, file);
-  if (previous && !previous.path && !previous.content && result.windowId === windowId && result.id !== previous.id) store.closeDocument(windowId, previous.id);
+  if (previous && !previous.path && !previous.content && result.windowId === windowId && result.id !== previous.id) void store.closeDocument(windowId, previous.id).catch(() => { /* Persistence reports its own failure. */ });
   store.activate(result.windowId, result.id);
   const target = windows.get(result.windowId)!; if (target.isMinimized()) target.restore(); target.focus();
   if (result.windowId !== windowId) notify(windows.get(windowId)!, '这份文件已经在另一个窗口打开，已切换到那个窗口。');
@@ -131,12 +165,9 @@ function registerIpc() {
     else if (action === 'cancel') updates.cancel();
     else if (action === 'install' && !quitInProgress && !quitting) {
       quitInProgress = true;
-      const installed = await updates.install(async () => {
-        await Promise.all([...windows.values()].map(window => collectEdits(window, true)));
-        await store.flush();
-      });
+      const installed = await updates.install(collectAndFlushWindows);
       if (installed) { quitting = true; app.quit(); }
-      else quitInProgress = false;
+      else { quitInProgress = false; for (const window of windows.values()) cancelClose(window); }
     }
     return updates.state;
   });
@@ -157,7 +188,12 @@ function registerIpc() {
     });
   });
   ipcMain.handle('pdf:release', event => { pdfPreviews.release(windowIdOf(event)); });
-  ipcMain.handle('workspace:bootstrap', event => workspaceView(windowIdOf(event)));
+  ipcMain.handle('workspace:bootstrap', event => {
+    const id = windowIdOf(event);
+    const view = store.view(id);
+    rememberRevisions(id, view);
+    return { ...view, ...workspaceChrome(id), recoveryNotices: store.recoveryNotices };
+  });
   ipcMain.handle('clipboard:text', async (event, action: string, text?: string) => { windowIdOf(event); if (action === 'write' && typeof text === 'string') { await clipboard.writeText(text); return ''; } if (action === 'read') return clipboard.readText(); throw new Error('剪贴板操作不受支持'); });
   const handle = (channel: string, action: (windowId: string, ...args: any[]) => Promise<void> | void) => {
     ipcMain.handle(channel, async (event, ...args): Promise<ActionResult> => {
@@ -307,26 +343,24 @@ function registerIpc() {
       return { url: await store.images.put(bytes, name) };
     } catch (error) { return { message: (error as Error).message }; }
   });
-  handle('document:export', async (id, docId: string, format: string, html: string) => {
-    requireOwned(id, docId); if (!['html', 'pdf'].includes(format) || typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('无法导出此文档');
-    const doc = store.documents.get(docId)!; const result = await dialog.showSaveDialog(windows.get(id)!, { title: `导出 ${format.toUpperCase()}`, defaultPath: (doc.path ?? doc.title).replace(/\.(md|markdown)$/i, '') + '.' + format, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+  handle('document:export-html', async (id, docId: string, html: string) => {
+    requireOwned(id, docId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('无法导出此文档');
+    const doc = store.documents.get(docId)!; const result = await dialog.showSaveDialog(windows.get(id)!, { title: '导出 HTML', defaultPath: (doc.path ?? doc.title).replace(/\.(md|markdown|mdown|mkd|txt)$/i, '') + '.html', filters: [{ name: 'HTML', extensions: ['html'] }] });
     if (result.canceled || !result.filePath) throw new Error('canceled');
     for (const match of [...html.matchAll(/src="(replica-media:[^"]+)"/g)]) {
       const response = await net.fetch(match[1].replaceAll('&amp;', '&')); if (!response.ok) continue;
       const bytes = Buffer.from(await response.arrayBuffer()); const mime = response.headers.get('content-type') ?? 'image/png';
       html = html.replace(match[1], `data:${mime};base64,${bytes.toString('base64')}`);
     }
-    if (format === 'html') { await atomicWrite(result.filePath, html); return; }
-    const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
-    try {
-      await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-      await printWindow.webContents.executeJavaScript('Promise.all([...document.images].map(i => i.complete ? Promise.resolve() : new Promise(r => { i.onload = i.onerror = r })))').catch(() => {});
-      const bytes = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } }); await atomicWrite(result.filePath, bytes);
-    } finally { printWindow.destroy(); }
+    await atomicWrite(result.filePath, html);
   });
   handle('link:open', async (_windowId, url: string) => { const parsed = new URL(url); if (!['https:', 'http:', 'mailto:'].includes(parsed.protocol)) throw new Error('暂不支持打开这类链接'); await shell.openExternal(parsed.href); });
-  ipcMain.on('document:update', (event, payload) => { try { const id = windowIdOf(event); if (!payload || typeof payload.content !== 'string') return; store.update(id, payload.id, payload.content, payload.revision); } catch (error) { console.error('Update rejected:', (error as Error).message); } });
-  ipcMain.on('window:ready-close', (event, token: string) => { const pending = pendingClose.get(token); if (pending?.sender === event.sender.id) pending.resolve(); });
+  ipcMain.on('document:update', (event, payload) => { try { const id = windowIdOf(event); if (!payload || typeof payload.content !== 'string') return; store.update(id, payload.id, payload.content, payload.revision, true); } catch (error) { console.error('Update rejected:', (error as Error).message); } });
+  ipcMain.on('window:ready-close', (event, token: string, prepared: boolean) => {
+    const pending = pendingClose.get(token);
+    if (pending?.sender !== event.sender.id || typeof prepared !== 'boolean') return;
+    try { windowIdOf(event); pending.finish(prepared); } catch {}
+  });
   ipcMain.on('window:control', (event, action: string) => {
     try { const window = windows.get(windowIdOf(event))!; if (action === 'minimize') window.minimize(); else if (action === 'maximize') window.isMaximized() ? window.unmaximize() : window.maximize(); else if (action === 'close') window.close(); } catch {}
   });
@@ -344,18 +378,26 @@ async function registerProtocols() {
     return net.fetch(pathToFileURL(file).href);
   });
   protocol.handle('replica-media', async request => {
+    const missing = () => new Response('Not found', { status: 404 });
     try {
+      if (request.method !== 'GET') return missing();
       const url = new URL(request.url);
-      if (url.hostname === 'draft') { const file = store.images.file(url.href); return file ? net.fetch(pathToFileURL(file).href) : new Response('Not found', { status: 404 }); }
-      const [id, ...parts] = url.pathname.slice(1).split('/'); const document = store.documents.get(id);
-      if (url.hostname !== 'document' || !document?.path) return new Response('Not found', { status: 404 });
-      const root = await fs.realpath(path.dirname(document.path)); let imagePath = decodeURIComponent(parts.join('/'));
-      const rootSetting = /^typora-root-url:\s*["']?([^\n"']+)/m.exec(document.content)?.[1].trim();
-      if (rootSetting && imagePath.startsWith('/')) imagePath = path.join(rootSetting, imagePath);
-      const file = await fs.realpath(path.resolve(root, imagePath));
-      if (!/\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i.test(file)) return new Response('Not found', { status: 404 });
-      return net.fetch(pathToFileURL(file).href);
-    } catch { return new Response('Not found', { status: 404 }); }
+      let image;
+      if (url.hostname === 'draft') {
+        image = await store.images.readDraft(url.href);
+      } else if (url.hostname === 'document') {
+        const [id, ...parts] = url.pathname.slice(1).split('/');
+        const document = store.documents.get(id);
+        if (document?.path && store.owner(id)) image = await readDocumentImage(document.path, decodeURIComponent(parts.join('/')), document.content);
+      }
+      if (!image) return missing();
+      return new Response(new Uint8Array(image.bytes), {
+        headers: {
+          'Content-Type': image.mime, 'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+        },
+      });
+    } catch { return missing(); }
   });
 }
 const initialFiles = process.argv.filter(arg => /\.(md|markdown|mdown|mkd)$/i.test(arg)).map(file => path.resolve(file));
@@ -364,6 +406,7 @@ const queuedLaunches: Array<{ argv: string[]; cwd: string }> = [];
 function handleLaunch(argv: string[], cwd: string) {
   if (!launchReady) { queuedLaunches.push({ argv, cwd }); return; }
   if (argv.includes('--quit-for-update')) { app.quit(); return; }
+  if (quitting || quitInProgress) return;
   const files = argv.filter(arg => /\.(md|markdown|mdown|mkd)$/i.test(arg));
   const target = [...windows.keys()][0];
   if (!files.length || argv.includes('--new-window') || !target) newBlankWindow();
@@ -373,7 +416,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', (_event, argv, cwd) => handleLaunch(argv, cwd));
   void app.whenReady().then(async () => {
-    if (process.platform === 'win32' && app.isPackaged && process.env.TYPORA_REPLICA_TEST !== '1') {
+    if (process.platform === 'win32' && app.isPackaged && !process.env.TYPORA_REPLICA_USER_DATA && process.env.TYPORA_REPLICA_TEST !== '1') {
       void repairWindowsShortcuts(shell, process.execPath, app.getPath('appData'), appIconPath).catch(error => console.error('Shortcut repair:', error));
       app.setUserTasks([{ program: process.execPath, arguments: '--new-window', iconPath: appIconPath, iconIndex: 0, title: '新建窗口', description: '新建一个墨页窗口' }]);
     }
@@ -394,8 +437,12 @@ else {
     if (quitInProgress) return;
     quitInProgress = true;
     void (async () => {
-      try { await Promise.all([...windows.values()].map(window => collectEdits(window))); await store.flush(); await updates.discard(); quitting = true; app.quit(); }
-      catch (error) { quitInProgress = false; store.onError(`无法保存恢复记录，请先手动保存文档：${(error as Error).message}`); }
+      try { await collectAndFlushWindows(); await updates.discard(); quitting = true; app.quit(); }
+      catch (error) {
+        quitInProgress = false;
+        for (const window of windows.values()) cancelClose(window);
+        store.onError(`暂时无法安全保存草稿，窗口保持打开：${(error as Error).message}`);
+      }
     })();
   });
   app.on('window-all-closed', () => { quitting = true; codeTheme.stop(); for (const item of fileWatchers.values()) { item.watcher.close(); clearTimeout(item.timer); } store.dispose(); void updates.discard().finally(() => app.quit()); });

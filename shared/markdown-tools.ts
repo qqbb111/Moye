@@ -100,13 +100,13 @@ export function toggleMarkup(source: string, from: number, to: number, left: str
   return result(from, to, left + selected + right, from + left.length, to + left.length);
 }
 
-export function markdownStatistics(source: string) {
+export function markdownStatistics(source: string, ast = parseMarkdown(source)) {
   const visible = (node: MarkdownNode): string => {
     if (['image', 'imageReference', 'definition', 'yaml', 'html'].includes(node.type)) return '';
     if (node.type === 'link' && /^data:image\//i.test(node.url ?? '')) return '';
     if (node.value !== undefined) return node.value.replace(/data:image\/[^,\s]+;base64,[A-Za-z0-9+/=]+/g, '');
     return (node.children ?? []).map(visible).join(['root', 'list', 'table', 'tableRow'].includes(node.type) ? '\n' : '');
   };
-  const text = visible(parseMarkdown(source));
+  const text = visible(ast);
   return { words: (text.match(/[\p{Script=Han}]|[\p{L}\p{N}]+/gu) ?? []).length, characters: text.replace(/\s/g, '').length, lines: source.split('\n').length };
 }

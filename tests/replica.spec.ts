@@ -207,6 +207,34 @@ test('启动、新建和打开后可立即输入，标签方向键可连续导�
   } finally { await application.close(); }
 });
 
+test('长文编辑后只同步状态，切到另一窗口时发送新文档正文', async () => {
+  const { application, page } = await launch();
+  try {
+    const long = '# 长文\n\n' + '用于验证工作区更新的正文。\n\n'.repeat(1800);
+    await setContent(page, long);
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content.length)).toBe(long.length);
+    const revision = await page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].revision);
+    await page.evaluate(() => {
+      const updates: import('../shared/types').WorkspaceUpdate[] = [];
+      (window as any).__workspaceUpdates = updates;
+      window.rypota.onState(update => updates.push(update));
+    });
+    await current(page).locator('.cm-content').focus();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText('尾');
+    const updates = () => page.evaluate(() => (window as any).__workspaceUpdates as import('../shared/types').WorkspaceUpdate[]);
+    await expect.poll(async () => (await updates()).some(update => update.documents.some(doc => doc.revision > revision))).toBe(true);
+    expect((await updates()).every(update => update.documents.every(doc => doc.content === undefined))).toBe(true);
+    expect(await content(page)).toBe(long + '尾');
+
+    const destination = application.waitForEvent('window');
+    await execute(page, 'detach');
+    const other = await destination;
+    await current(other).locator('.markdown-editor').waitFor();
+    await expect.poll(() => content(other)).toBe(long + '尾');
+  } finally { await application.close(); }
+});
+
 test('快捷键名称仅录制绑定，说明按需显示且设置控件可通过键盘访问', async () => {
   const { application, page } = await launch();
   try {
@@ -445,6 +473,42 @@ test('更新退出参数走正常保存流程，多窗口草稿在再次启动�
     restored = await launch(first.profile);
     await expect.poll(async () => Promise.all(restored!.application.windows().map(page => content(page)))).toEqual(expect.arrayContaining(['更新之前第一份草稿', '第二个窗口尚未保存的内容']));
   } finally { await first.application.close().catch(() => {}); await restored?.application.close(); }
+});
+
+test('恢复记录写入失败时保留原窗口，解除故障后退出并恢复新内容', async () => {
+  let instance = await launch();
+  try {
+    const { application, page, profile } = instance;
+    await setContent(page, '故障前的草稿');
+    await expect(page.locator('#save-status')).toContainText('草稿已保存');
+    const secondOpened = application.waitForEvent('window');
+    await execute(page, 'new-window');
+    const second = await secondOpened;
+    await second.locator('.markdown-editor').waitFor();
+    await application.evaluate(() => {
+      const store = (globalThis as any).__replicaTest.store;
+      const persist = store.persist.bind(store);
+      store.persist = (closedWindow?: string) => closedWindow ? Promise.reject(new Error('模拟关闭状态写入失败')) : persist();
+      (globalThis as any).__resumePersistence = () => { store.persist = persist; };
+    });
+    await page.locator('[data-control="close"]').click();
+    await expect(page.locator('#toast')).toContainText('窗口保持打开');
+    await expect(page.locator('#editor-stage')).toBeVisible();
+    await setContent(page, '失败后依然可以写入草稿');
+    await expect.poll(() => fs.readFile(path.join(profile, 'recovery/workspace.json'), 'utf8')).toContain('失败后依然可以写入草稿');
+    await application.evaluate(() => (globalThis as any).__resumePersistence());
+    const closed = page.waitForEvent('close');
+    await page.locator('[data-control="close"]').click();
+    await closed;
+    await instance.application.close();
+    instance = await launch(profile);
+    await expect.poll(() => instance.page.evaluate(async () => (await window.rypota.bootstrap()).drafts.map(draft => draft.content))).toContain('失败后依然可以写入草稿');
+  } finally {
+    if (instance.application.process().exitCode === null) {
+      await instance.application.evaluate(() => (globalThis as any).__resumePersistence?.()).catch(() => {});
+      await instance.application.close();
+    }
+  }
 });
 
 test('设置集中分类，操作保留正文与表格选区，快捷键录制冲突提示和重启持久化', async () => {
@@ -1506,12 +1570,12 @@ test('目录随标题更新、脚注、YAML 元数据和 Mermaid 预览', async 
   } finally { await application.close(); }
 });
 
-test('外部文件实时更新和父目录图片路径', async () => {
-  const { application, page, directory } = await launch(); const child = path.join(directory, '子目录'); await fs.mkdir(child); await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(directory, '图片.png')); const file = path.join(child, '笔记.md'); await fs.writeFile(file, '# 初始内容\n\n![图片](../图片.png)\n');
+test('外部文件实时更新和文档目录内的相对图片路径', async () => {
+  const { application, page, directory } = await launch(); const child = path.join(directory, '子目录'); await fs.mkdir(child); await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(child, '图片.png')); const file = path.join(directory, '笔记.md'); await fs.writeFile(file, '# 初始内容\n\n![图片](子目录/图片.png)\n');
   try {
     await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, file); await execute(page, 'open'); await expect(current(page).locator('.md-h1')).toHaveText('初始内容');
     await expect.poll(() => current(page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-    await fs.writeFile(file, '# 从外部更新\n\n![图片](../图片.png)\n'); await expect(current(page).locator('.md-h1')).toHaveText('从外部更新'); expect(await content(page)).toContain('从外部更新');
+    await fs.writeFile(file, '# 从外部更新\n\n![图片](子目录/图片.png)\n'); await expect(current(page).locator('.md-h1')).toHaveText('从外部更新'); expect(await content(page)).toContain('从外部更新');
   } finally { await application.close(); }
 });
 

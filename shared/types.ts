@@ -27,7 +27,13 @@ export interface WorkspaceView {
   preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: CodeThemePreference; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; shortcuts?: ShortcutOverrides; print?: PrintPreferences };
   codeTheme?: CodeThemeSnapshot;
   recovered: boolean;
+  recoveryNotices?: string[];
 }
+export type WorkspaceDocumentUpdate = Omit<DocumentView, 'content'> & { content?: string };
+export type WorkspaceUpdate = Omit<WorkspaceView, 'documents' | 'drafts'> & {
+  documents: WorkspaceDocumentUpdate[];
+  drafts: WorkspaceDocumentUpdate[];
+};
 export type AppCommand = string;
 export interface FolderEntry { name: string; path: string; directory: boolean }
 export interface FolderView { path: string; entries: FolderEntry[]; hasParent: boolean }
@@ -70,7 +76,7 @@ export interface RypotaBridge {
   listFolder(path: string): Promise<FolderEntry[]>;
   openFolderFile(path: string): Promise<ActionResult>;
   insertImage(id: string, data?: { bytes: number[]; name: string }): Promise<{ url?: string; message?: string }>;
-  exportDocument(id: string, format: 'html' | 'pdf', html: string): Promise<ActionResult>;
+  exportHtml(id: string, html: string): Promise<ActionResult>;
   previewPdf(id: string, html: string, options: PrintOptions, requestId?: string): Promise<PdfPreviewResult>;
   previewPdfFirstPage(id: string, html: string, options: PrintOptions, requestId: string): Promise<void>;
   onPdfFirstPage(listener: (page: PdfFirstPage) => void): () => void;
@@ -79,10 +85,11 @@ export interface RypotaBridge {
   fullscreen(): void;
   paste(): Promise<ActionResult>;
   clipboard(action: 'read' | 'write', text?: string): Promise<string>;
-  finishClose(token: string): void;
-  onState(listener: (view: WorkspaceView) => void): () => void;
+  finishClose(token: string, prepared: boolean): void;
+  onState(listener: (view: WorkspaceUpdate) => void): () => void;
   onCommand(listener: (command: AppCommand) => void): () => void;
   onPrepareClose(listener: (token: string) => void): () => void;
+  onCancelClose(listener: () => void): () => void;
   onMessage(listener: (message: string) => void): () => void;
 }
 declare global { interface Window { rypota: RypotaBridge } }

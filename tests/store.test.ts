@@ -140,6 +140,85 @@ test('损坏的恢复记录可以从备份读取，损坏文件不覆盖有效�
   const { store, windowId } = await setup();
   try { const id = store.newDocument(windowId); store.update(windowId, id, '需要保留的草稿', 1); await store.flush(); await store.persist(); store.dispose(); await fs.writeFile(store.sessionPath, '{损坏的 JSON'); const restored = new DocumentStore(store.directory); await restored.initialize(); try { assert.equal(restored.view(windowId).documents[0].content, '需要保留的草稿'); await restored.persist(); assert.equal(JSON.parse(await fs.readFile(`${store.sessionPath}.bak`, 'utf8')).documents[0].content, '需要保留的草稿'); } finally { restored.dispose(); } } finally { store.dispose(); }
 });
+test('主恢复文件与备份均损坏时保留原始字节，新草稿仍可写入并重启恢复', async () => {
+  const { store } = await setup();
+  const primary = Buffer.from([0x7b, 0xff, 0x00]);
+  const backup = Buffer.from(JSON.stringify({ version: 1, windows: [], documents: [{ content: '残留的草稿内容' }] }));
+  store.dispose();
+  await fs.writeFile(store.sessionPath, primary);
+  await fs.writeFile(`${store.sessionPath}.bak`, backup);
+  const replacement = new DocumentStore(store.directory);
+  try {
+    await replacement.initialize();
+    assert.equal(replacement.recovered, false);
+    assert.match(replacement.recoveryNotices.join(' '), /\.damaged-/);
+    const windowId = replacement.newWindow();
+    replacement.newDocument(windowId, '这是新的草稿');
+    await replacement.flush();
+    await replacement.persist();
+    const files = await fs.readdir(store.directory);
+    const damaged = (prefix: string) => path.join(store.directory, files.find(file => file.startsWith(prefix))!);
+    assert.deepEqual(await fs.readFile(damaged('workspace.json.damaged-')), primary);
+    assert.deepEqual(await fs.readFile(damaged('workspace.json.bak.damaged-')), backup);
+    const restored = new DocumentStore(store.directory);
+    try {
+      await restored.initialize();
+      assert.equal(restored.view(windowId).documents[0].content, '这是新的草稿');
+    } finally { restored.dispose(); }
+  } finally { replacement.dispose(); }
+});
+test('恢复位置被目录占用时保留原始文件并拒绝写入，清除障碍后可重新保存', async () => {
+  const { store } = await setup();
+  store.dispose();
+  const primary = store.sessionPath;
+  const backup = primary + '.bak';
+  await fs.mkdir(primary);
+  await fs.writeFile(backup, '损坏但需要保留的备份');
+  const restored = new DocumentStore(store.directory);
+  try {
+    await restored.initialize();
+    assert.match(restored.recoveryNotices.join(' '), /被文件夹占用/);
+    const windowId = restored.newWindow();
+    restored.newDocument(windowId, '等待保存');
+    await assert.rejects(restored.flush(), /被文件夹占用/);
+    assert.equal(await fs.readFile(backup, 'utf8'), '损坏但需要保留的备份');
+    await fs.rename(primary, primary + '.obstructed');
+    await restored.flush();
+    const saved = JSON.parse(await fs.readFile(primary, 'utf8'));
+    assert.equal(saved.documents[0].content, '等待保存');
+    const files = await fs.readdir(store.directory);
+    const quarantined = files.find(file => file.startsWith('workspace.json.bak.damaged-'));
+    assert.equal(await fs.readFile(path.join(store.directory, quarantined!), 'utf8'), '损坏但需要保留的备份');
+  } finally { restored.dispose(); }
+});
+test('关闭窗口写入失败保留文档归属与草稿，恢复写入后关闭并可重新打开草稿', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const id = store.newDocument(windowId, '关闭前草稿');
+    const remainingWindow = store.newWindow();
+    await store.flush();
+    await store.persist();
+    const backup = store.sessionPath + '.bak';
+    const stashed = backup + '.stashed';
+    await fs.rename(backup, stashed);
+    await fs.mkdir(backup);
+    await assert.rejects(store.removeWindow(windowId));
+    assert.equal(store.owner(id), windowId);
+    store.update(windowId, id, '失败后仍可编辑', 1);
+    await assert.rejects(store.closeDocument(windowId, id));
+    assert.equal(store.owner(id), windowId);
+    await fs.rmdir(backup);
+    await fs.rename(stashed, backup);
+    await store.removeWindow(windowId);
+    assert.equal(store.owner(id), undefined);
+    const restored = new DocumentStore(store.directory);
+    try {
+      await restored.initialize();
+      assert.equal(restored.windows.has(windowId), false);
+      assert.equal(restored.view(remainingWindow).drafts[0].content, '失败后仍可编辑');
+    } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
 test('两个窗口打开同一路径会找到同一份文档，禁止另存为覆盖其他标签', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '唯一.md'); await fs.writeFile(file, '文档');
   try { const first = await store.openFile(windowId, file); const secondWindow = store.newWindow(); const second = await store.openFile(secondWindow, file); assert.deepEqual(second, first); const untitled = store.newDocument(secondWindow, '另一份内容'); await assert.rejects(store.save(untitled, file), /其他标签页/); assert.equal(await fs.readFile(file, 'utf8'), '文档'); } finally { store.dispose(); }

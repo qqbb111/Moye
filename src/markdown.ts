@@ -29,9 +29,9 @@ function headingLabel(node: MarkdownNode): string {
   if (node.type === 'html' && /^<\/?mark>$/i.test(node.value ?? '')) return '';
   return node.value ?? (node.children ?? []).map(headingLabel).join('');
 }
-export function headings(source: string) {
+export function headings(source: string | MarkdownNode) {
   const result: Array<{ level: number; text: string; offset: number; slug: string }> = []; const used = new Map<string, number>();
-  walk(parseMarkdown(source), node => {
+  walk(typeof source === 'string' ? parseMarkdown(source) : source, node => {
     if (node.type !== 'heading') return;
     const text = headingLabel(node); const base = text.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');
     const count = used.get(base) ?? 0; used.set(base, count + 1);

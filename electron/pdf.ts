@@ -15,7 +15,9 @@ function stop(job?: PrintJob) {
 async function resolveImages(html: string, signal: AbortSignal) {
   if (!/<head>/i.test(html)) throw new Error('打印文档格式不正确');
   html = html.replace(/<head>/i, '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; font-src data:; style-src \'unsafe-inline\'; script-src \'none\'; base-uri \'none\'; form-action \'none\'">');
-  const urls = [...new Set([...html.matchAll(/src="((?:replica-media:|https?:)[^"]+)"/g)].map(match => match[1]))];
+  const imageSources = [...html.matchAll(/<img\b[^>]*?\ssrc="([^"]+)"/gi)].map(match => match[1]);
+  if (imageSources.some(url => /^https?:\/\//i.test(url))) throw new Error('打印前请用「插入图片」将网络图片导入为附件');
+  const urls = [...new Set(imageSources.filter(url => /^replica-media:/i.test(url)))];
   for (let index = 0; index < urls.length; index += 4) {
     const images = await Promise.all(urls.slice(index, index + 4).map(async url => {
       const response = await net.fetch(url.replaceAll('&amp;', '&'), { signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });

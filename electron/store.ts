@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { DocumentView, WorkspaceView } from '../shared/types';
+import type { DocumentView, WorkspaceView, WorkspaceUpdate } from '../shared/types';
 import { tidyChineseMarkdown, applyEdits } from '../shared/markdown-tools';
 import { printPreferences } from '../shared/print';
 import { isCodeThemePreference } from '../shared/code-theme';
@@ -17,6 +17,17 @@ interface DocumentRecord extends DocumentView {
 }
 interface WindowRecord { id: string; documentIds: string[]; activeId: string | null }
 interface Snapshot { version: 1; documents: DocumentRecord[]; windows: WindowRecord[]; recent: string[]; preferences: WorkspaceView['preferences'] }
+function parseSnapshot(text: string): Snapshot {
+  const value = JSON.parse(text) as Snapshot;
+  if (value?.version !== 1 || !Array.isArray(value.documents) || !Array.isArray(value.windows)) throw new Error('恢复文件格式不正确');
+  const ids = new Set<string>();
+  for (const doc of value.documents) {
+    if (!doc || typeof doc.id !== 'string' || ids.has(doc.id) || typeof doc.title !== 'string' || typeof doc.content !== 'string' || typeof doc.savedContent !== 'string' || doc.path !== null && typeof doc.path !== 'string' || !Number.isSafeInteger(doc.revision)) throw new Error('恢复文件中的文档不完整');
+    ids.add(doc.id);
+  }
+  if (value.windows.some(window => !window || typeof window.id !== 'string' || !Array.isArray(window.documentIds) || window.documentIds.some(id => typeof id !== 'string'))) throw new Error('恢复文件中的窗口不完整');
+  return value;
+}
 export class FileConflictError extends Error { constructor(message = '文件已被其他程序修改。当前编辑内容已保留，请选择另存为或确认覆盖。') { super(message); this.name = 'FileConflictError'; } }
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
@@ -87,12 +98,14 @@ export class DocumentStore {
   recent: string[] = [];
   preferences: WorkspaceView['preferences'] = { autoSave: true, theme: 'light', fontSize: 16, sidebar: false, tabs: true, codeTheme: 'github-dark', codeWrap: true, readingWidth: 900, sidebarWidth: 256, appearanceRevision: 1 };
   recovered = false;
-  onChanged: () => void = () => {};
+  readonly recoveryNotices: string[] = [];
+  onChanged: (edit?: { windowId: string; documentId: string; revision: number }) => void = () => {};
   onError: (message: string) => void = () => {};
   private persistTimer?: ReturnType<typeof setTimeout>;
   private autoTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private writes = new Map<string, Promise<unknown>>();
   private persistence: Promise<unknown> = Promise.resolve();
+  private readonly damagedRecoveryFiles = new Set<string>();
   private counter = 0;
   constructor(readonly directory: string, private delays = { autoSave: 1200, recovery: 250 }) { this.images = new ImageAttachments(path.join(directory, 'assets'), atomicWrite); }
   get sessionPath() { return path.join(this.directory, 'workspace.json'); }
@@ -101,10 +114,19 @@ export class DocumentStore {
     let snapshot: Snapshot | null = null;
     for (const candidate of [this.sessionPath, `${this.sessionPath}.bak`]) {
       try {
-        const parsed = JSON.parse(await fs.readFile(candidate, 'utf8')) as Snapshot;
-        if (parsed.version !== 1 || !Array.isArray(parsed.documents) || !Array.isArray(parsed.windows)) throw new Error('恢复文件格式不正确');
-        snapshot = parsed; break;
-      } catch (error) { if (!missing(error)) this.onError('恢复记录无法读取，正在尝试备份。原有文件已保留。'); }
+        const parsed = parseSnapshot(await fs.readFile(candidate, 'utf8'));
+        snapshot ??= parsed;
+      } catch (error) { if (!missing(error)) this.damagedRecoveryFiles.add(candidate); }
+    }
+    if (this.damagedRecoveryFiles.size) {
+      // The canonical backup remains readable until the new primary is written.
+      // Every damaged candidate is retained independently of later rotations.
+      let blocked: string | undefined;
+      try { await this.preserveDamagedRecoveryFiles(); } catch (error) { blocked = (error as Error).message; }
+      const status = snapshot ? '已恢复可读取的草稿。' : '未能读取旧草稿。';
+      this.recoveryNotices.push(blocked
+        ? `${status}${blocked}`
+        : `${status}原恢复文件已保存在恢复目录中，文件名含 .damaged-：${this.directory}`);
     }
     if (!snapshot) return;
     this.recovered = true;
@@ -119,7 +141,6 @@ export class DocumentStore {
     let migratedImages = false;
     this.recent = Array.isArray(snapshot.recent) ? snapshot.recent.filter(x => typeof x === 'string').slice(0, 12) : [];
     for (const item of snapshot.documents) {
-      if (typeof item.id !== 'string' || typeof item.content !== 'string' || typeof item.savedContent !== 'string') continue;
       const document: DocumentRecord = { ...item, dirty: item.content !== item.savedContent || (!item.path && item.content.length > 0), status: item.path && item.content === item.savedContent ? 'saved' : 'draft', error: null, draftRevision: item.revision, draftSavedAt: item.draftSavedAt ?? Date.now() };
       if (document.path) {
         try {
@@ -134,18 +155,20 @@ export class DocumentStore {
       }
       if (!document.path && /data:image\//i.test(document.content)) {
         try { const content = await this.images.materialize(document.content); if (content !== document.content) { document.content = content; document.revision++; document.dirty = true; document.status = 'draft'; migratedImages = true; } }
-        catch { this.onError('部分草稿图片暂时无法转成附件，原始数据仍已保留。'); }
+        catch { if (!this.recoveryNotices.includes('部分草稿图片无法转换为附件，原始数据仍已保留。')) this.recoveryNotices.push('部分草稿图片无法转换为附件，原始数据仍已保留。'); }
       }
       this.documents.set(document.id, document);
     }
     const owned = new Set<string>();
     for (const item of snapshot.windows) {
-      if (typeof item.id !== 'string' || !Array.isArray(item.documentIds)) continue;
       const ids = item.documentIds.filter(id => this.documents.has(id) && !owned.has(id));
       ids.forEach(id => owned.add(id));
       this.windows.set(item.id, { id: item.id, documentIds: ids, activeId: ids.includes(item.activeId ?? '') ? item.activeId : ids[0] ?? null });
     }
-    if (migratedImages || migrateAppearance) await this.persist();
+    if (migratedImages || migrateAppearance) {
+      try { await this.persist(); }
+      catch { this.recoveryNotices.push('恢复内容已载入，但暂时无法写入。请检查恢复目录权限，或手动将文档另存为。'); }
+    }
   }
   newWindow() {
     const window: WindowRecord = { id: randomUUID(), documentIds: [], activeId: null };
@@ -182,7 +205,7 @@ export class DocumentStore {
     if (ids.every((id, index) => window.documentIds[index] === id)) return;
     window.documentIds = [...ids]; this.changed();
   }
-  update(windowId: string, id: string, content: string, revision: number) {
+  update(windowId: string, id: string, content: string, revision: number, fromRenderer = false) {
     const document = this.requireDocument(windowId, id);
     if (!Number.isSafeInteger(revision) || revision <= document.revision || typeof content !== 'string') return;
     document.content = content; document.revision = revision; document.updatedAt = Date.now();
@@ -192,7 +215,7 @@ export class DocumentStore {
     if (this.preferences.autoSave && document.path && document.dirty && !document.error) {
       this.autoTimers.set(id, setTimeout(() => { this.autoTimers.delete(id); void this.save(id).catch(() => {}); }, this.delays.autoSave));
     }
-    this.changed();
+    this.changed(fromRenderer ? { windowId, documentId: id, revision } : undefined);
   }
   private async writeDocument(id: string, operation: () => Promise<void>) {
     const preceding = this.writes.get(id) ?? Promise.resolve();
@@ -286,7 +309,10 @@ export class DocumentStore {
     const document = this.requireDocument(windowId, id);
     const timer = this.autoTimers.get(id); if (timer) clearTimeout(timer); this.autoTimers.delete(id);
     if (document.path && document.dirty && this.preferences.autoSave && !document.error) await this.save(id).catch(() => {});
+    // Keep a dirty tab open if its current contents cannot reach recovery.
+    while (document.dirty && document.draftRevision < document.revision) await this.persist();
     const window = this.requireWindow(windowId); const index = window.documentIds.indexOf(id);
+    if (index < 0) return;
     window.documentIds.splice(index, 1);
     if (window.activeId === id) window.activeId = window.documentIds[Math.min(index, window.documentIds.length - 1)] ?? null;
     if ((!document.dirty && document.path) || (!document.path && !document.content)) this.documents.delete(id);
@@ -303,11 +329,7 @@ export class DocumentStore {
     source.documentIds = source.documentIds.filter(value => value !== id); source.activeId = source.documentIds[0] ?? null;
     destination.documentIds.push(id); destination.activeId = id; this.changed();
   }
-  removeWindow(windowId: string) {
-    const window = this.requireWindow(windowId);
-    for (const id of window.documentIds) { const document = this.documents.get(id); if (document && document.path && !document.dirty) this.documents.delete(id); }
-    this.windows.delete(windowId); this.changed();
-  }
+  async removeWindow(windowId: string) { this.requireWindow(windowId); await this.persist(windowId); }
   setPreferences(preferences: Partial<WorkspaceView['preferences']>) {
     const shortcuts = preferences.shortcuts === undefined ? undefined : validateShortcuts(preferences.shortcuts);
     if (shortcuts) this.preferences.shortcuts = shortcuts;
@@ -333,21 +355,55 @@ export class DocumentStore {
     const window = this.requireWindow(windowId);
     return { windowId, documents: window.documentIds.map(id => this.publicDocument(this.documents.get(id)!)), activeId: window.activeId, drafts: [...this.documents.values()].filter(doc => !this.owner(doc.id) && doc.dirty).map(doc => this.publicDocument(doc)), recent: [...this.recent], preferences: { ...this.preferences }, recovered: this.recovered };
   }
+  workspaceUpdate(windowId: string, knownRevisions: ReadonlyMap<string, number>): WorkspaceUpdate {
+    const { documents, drafts, ...workspace } = this.view(windowId);
+    const update = ({ content, ...doc }: DocumentView) => knownRevisions.get(doc.id) === doc.revision ? doc : { ...doc, content };
+    return { ...workspace, documents: documents.map(update), drafts: drafts.map(update) };
+  }
   private publicDocument(document: DocumentRecord): DocumentView {
     const { savedContent, diskHash, eol, bom, ...view } = document; return { ...view };
   }
   private snapshot(): Snapshot { return { version: 1, documents: [...this.documents.values()].map(doc => ({ ...doc })), windows: [...this.windows.values()].map(window => ({ ...window, documentIds: [...window.documentIds] })), preferences: { ...this.preferences }, recent: [...this.recent] }; }
-  async persist() {
+  private async preserveDamagedRecoveryFiles() {
+    for (const file of this.damagedRecoveryFiles) {
+      const info = await fs.lstat(file).catch(error => { if (!missing(error)) throw error; });
+      if (info?.isDirectory()) throw new Error(`恢复文件位置被文件夹占用，请将其移走后重试：${file}`);
+      if (info) {
+        try { await fs.rename(file, `${file}.damaged-${randomUUID()}`); }
+        catch { throw new Error(`无法保留旧恢复文件，请检查目录权限：${file}`); }
+      }
+      this.damagedRecoveryFiles.delete(file);
+    }
+  }
+  async persist(closedWindowId?: string) {
     const task = this.persistence.catch(() => {}).then(async () => {
       const snapshot = this.snapshot(); const now = Date.now();
+      const removedIds = new Set<string>();
+      if (closedWindowId) {
+        // Change ownership only after the closed-window state reaches disk.
+        const removed = snapshot.windows.find(window => window.id === closedWindowId);
+        for (const document of snapshot.documents) if (document.path && !document.dirty && removed?.documentIds.includes(document.id)) removedIds.add(document.id);
+        snapshot.windows = snapshot.windows.filter(window => window.id !== closedWindowId);
+        snapshot.documents = snapshot.documents.filter(document => !removedIds.has(document.id));
+      }
       snapshot.documents.forEach(doc => { doc.draftRevision = doc.revision; doc.draftSavedAt = now; });
+      if (this.damagedRecoveryFiles.size) await this.preserveDamagedRecoveryFiles();
       try {
         const previous = await fs.readFile(this.sessionPath, 'utf8');
-        let valid = false;
-        try { const value = JSON.parse(previous); valid = value.version === 1 && Array.isArray(value.documents) && Array.isArray(value.windows); } catch {}
+        let valid = true;
+        try {
+          const parsed = JSON.parse(previous) as Snapshot;
+          valid = parsed?.version === 1 && Array.isArray(parsed.documents) && Array.isArray(parsed.windows);
+        } catch { valid = false; }
+        if (!valid) this.damagedRecoveryFiles.add(this.sessionPath);
         if (valid) await atomicWrite(`${this.sessionPath}.bak`, previous);
       } catch (error) { if (!missing(error)) throw error; }
+      if (this.damagedRecoveryFiles.size) await this.preserveDamagedRecoveryFiles();
       await atomicWrite(this.sessionPath, JSON.stringify(snapshot));
+      if (closedWindowId) {
+        this.windows.delete(closedWindowId);
+        for (const id of removedIds) this.documents.delete(id);
+      }
       snapshot.documents.forEach(saved => { const current = this.documents.get(saved.id); if (current) { current.draftRevision = Math.max(current.draftRevision, saved.revision); current.draftSavedAt = now; } });
       this.onChanged();
     });
@@ -364,5 +420,5 @@ export class DocumentStore {
   private requireWindow(id: string) { const window = this.windows.get(id); if (!window) throw new Error('窗口已关闭'); return window; }
   private requireDocument(windowId: string, id: string) { if (!this.requireWindow(windowId).documentIds.includes(id)) throw new Error('这个文档不属于当前窗口'); return this.documents.get(id)!; }
   private touchRecent(file: string) { this.recent = [path.resolve(file), ...this.recent.filter(item => pathKey(item) !== pathKey(file))].slice(0, 12); }
-  private changed() { this.onChanged(); if (this.persistTimer) clearTimeout(this.persistTimer); this.persistTimer = setTimeout(() => { this.persistTimer = undefined; void this.persist().catch(() => {}); }, this.delays.recovery); }
+  private changed(edit?: Parameters<DocumentStore['onChanged']>[0]) { this.onChanged(edit); if (this.persistTimer) clearTimeout(this.persistTimer); this.persistTimer = setTimeout(() => { this.persistTimer = undefined; void this.persist().catch(() => {}); }, this.delays.recovery); }
 }

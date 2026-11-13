@@ -18,8 +18,8 @@ import { MarkdownEditor, exportHTML, editorAction } from './editor';
 import { Settings } from './settings';
 import { COMMANDS, commandKeys, shortcutFromEvent } from '../shared/commands';
 import { selectLine } from '@codemirror/commands';
-import { headings } from './markdown';
-import type { WorkspaceView, DocumentView, ActionResult, FolderEntry, FolderView, DocumentReference, SaveMode } from '../shared/types';
+import { headings, type MarkdownNode } from './markdown';
+import type { WorkspaceView, WorkspaceUpdate, WorkspaceDocumentUpdate, DocumentView, ActionResult, FolderEntry, FolderView, DocumentReference, SaveMode } from '../shared/types';
 
 const bridge = window.rypota;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -57,7 +57,7 @@ const expandedFolders = new Set<string>();
 const nameOf = (file: string) => file.split(/[\\/]/).filter(Boolean).at(-1) ?? file;
 const activeDocument = () => workspace?.documents.find(doc => doc.id === workspace.activeId);
 const activeEditor = () => slots.get(workspace?.activeId ?? '')?.editor;
-function toast(message: string) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4000); }
+function toast(message: string, duration = 4000) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, duration); }
 async function run(action: () => Promise<ActionResult>) { try { const result = await action(); if (!result.ok && result.message) toast(result.message); } catch (error) { toast((error as Error).message); } }
 function scheduleRender() { if (renderPending) return; renderPending = true; requestAnimationFrame(() => { renderPending = false; render(); }); }
 function changed(id: string, content: string) {
@@ -77,7 +77,7 @@ function media(id: string, url: string) {
   return `replica-media://document/${id}/${encodeURIComponent(decoded.replaceAll('\\', '/'))}`;
 }
 function link(url: string) {
-  if (url.startsWith('#')) { const doc = activeDocument(); const editor = activeEditor(); if (!doc || !editor) return; const heading = headings(doc.content).find(item => item.slug === decodeURIComponent(url.slice(1))); if (heading) { editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); } return; }
+  if (url.startsWith('#')) { const editor = activeEditor(); if (!editor) return; const heading = currentOutline().find(item => item.slug === decodeURIComponent(url.slice(1))); if (heading) { editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); } return; }
   void run(() => bridge.openExternal(url));
 }
 function ensureEditor(doc: DocumentView) {
@@ -98,11 +98,18 @@ async function pasteImage(id: string, file: File) {
     if (result.message) toast(result.message); if (result.url) slots.get(id)?.editor.insertImage(result.url, file.name);
   } catch (error) { toast((error as Error).message); }
 }
-function applyState(next: WorkspaceView) {
+function applyState(next: WorkspaceUpdate) {
   const previousId = workspace?.activeId;
   const previousPreferences = workspace?.preferences;
-  if (workspace) next.documents = next.documents.map(incoming => { const local = workspace.documents.find(doc => doc.id === incoming.id); return local && local.revision > incoming.revision ? { ...incoming, content: local.content, revision: local.revision, dirty: true, status: incoming.error ? incoming.status : 'draft' } : incoming; });
-  workspace = next;
+  const cached = new Map([...workspace?.documents ?? [], ...workspace?.drafts ?? []].map(doc => [doc.id, doc]));
+  const merge = (incoming: WorkspaceDocumentUpdate): DocumentView => {
+    const local = cached.get(incoming.id);
+    if (local && local.revision > incoming.revision) return { ...incoming, content: local.content, revision: local.revision, dirty: true, status: incoming.error ? incoming.status : 'draft' };
+    const content = incoming.content ?? local?.content;
+    if (content === undefined) throw new Error('工作区正文快照尚未同步');
+    return { ...incoming, content };
+  };
+  workspace = { ...next, documents: next.documents.map(merge), drafts: next.drafts.map(merge) };
   settings.syncPreferences(previousPreferences);
   for (const [id, slot] of slots) if (!workspace.documents.some(doc => doc.id === id)) { slot.editor.destroy(); slot.element.remove(); slots.delete(id); }
   const doc = activeDocument(); if (doc) ensureEditor(doc);
@@ -289,7 +296,21 @@ function syncSidebar(visible: boolean) {
   };
 }
 let statisticsSource = ''; let statistics = markdownStatistics('');
-function currentStatistics() { const source = activeDocument()?.content ?? ''; if (statisticsSource !== source) { statisticsSource = source; statistics = markdownStatistics(source); } return statistics; }
+function currentStatistics() {
+  const source = activeDocument()?.content ?? '';
+  if (statisticsSource !== source) {
+    statisticsSource = source;
+    statistics = markdownStatistics(source, activeEditor()?.markdownTree);
+  }
+  return statistics;
+}
+let outlineSource: MarkdownNode | string = '';
+let outline = headings('');
+function currentOutline() {
+  const source = activeEditor()?.markdownTree ?? activeDocument()?.content ?? '';
+  if (outlineSource !== source) { outlineSource = source; outline = headings(source); }
+  return outline;
+}
 function render() {
   if (!workspace) return; const doc = activeDocument(); const editor = activeEditor(); const preferences = workspace.preferences;
   document.documentElement.dataset.theme = preferences.theme; document.documentElement.style.setProperty('--font-size', `${preferences.fontSize}px`);
@@ -407,7 +428,7 @@ function renderSidebar() {
   if (holdInlineRename(container) || $('#sidebar').hidden) return;
   const query = $<HTMLInputElement>('#sidebar-filter').value.trim().toLocaleLowerCase();
   const matches = (text: string) => text.toLocaleLowerCase().includes(query);
-  const outline = library === 'outline' ? headings(activeDocument()?.content ?? '') : [];
+  const outline = library === 'outline' ? currentOutline() : [];
   const entries = library === 'outline' ? [workspace.activeId, outline] : library === 'drafts' ? workspace.drafts.map(d => [d.id, d.title, d.path]) : folder ?? workspace.documents.map(d => [d.id, d.title, d.path]);
   const signature = JSON.stringify([library, query, entries]);
   const selected = activeDocument();
@@ -863,7 +884,7 @@ async function execute(action: string, value?: string) {
       body{box-sizing:border-box;width:100%;max-width:${width}px;padding-inline:clamp(16px,5vw,42px);overflow-wrap:anywhere}
       table{width:100%;margin:12px 0;border-collapse:collapse}td,th{overflow-wrap:anywhere}
     </style></head><body>${body}</body></html>`;
-    return run(() => bridge.exportDocument(doc.id, 'html', html));
+    return run(() => bridge.exportHtml(doc.id, html));
   }
   if (action === 'paste') { if (!document.activeElement?.closest('#editor-stage')) editor?.focus(); return run(() => bridge.paste()); }
   if (['cut', 'copy', 'paste', 'select-all'].includes(action)) {
@@ -1010,7 +1031,37 @@ sidebarResize.ondblclick = () => void run(() => bridge.updatePreferences({ sideb
 $('#quick-open').addEventListener('close', () => requestAnimationFrame(() => { if (!document.querySelector('dialog[open]')) activeEditor()?.focus(); }));
 $('#settings-open').onmousedown = event => event.preventDefault();
 $('#settings-open').onclick = event => settings.open('常规', event.detail > 0);
-bridge.onState(applyState); bridge.onCommand(command => void execute(command)); bridge.onMessage(toast); bridge.onPrepareClose(async token => { await Promise.allSettled([...pendingImages]); flushAll(); await settings.flush(); bridge.finishClose(token); });
-void bridge.bootstrap().then(applyState).catch(error => toast(`无法读取工作区：${error.message}`));
+const startupUpdates: WorkspaceUpdate[] = [];
+bridge.onState(update => { if (workspace) applyState(update); else startupUpdates.push(update); });
+bridge.onCommand(command => void execute(command)); bridge.onMessage(toast);
+let closeToken: string | undefined;
+let closeFocus: HTMLElement | undefined;
+bridge.onPrepareClose(async token => {
+  closeToken = token;
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement) closeFocus = focused;
+  try {
+    flushAll();
+    for (const element of [...app.children, ...document.querySelectorAll('dialog')]) if (element instanceof HTMLElement && element.id !== 'toast') element.inert = true;
+    await Promise.allSettled([...pendingImages]);
+    flushAll();
+    await settings.flush();
+    if (closeToken === token) bridge.finishClose(token, true);
+  } catch {
+    if (closeToken === token) bridge.finishClose(token, false);
+  }
+});
+bridge.onCancelClose(() => {
+  if (!closeToken) return;
+  closeToken = undefined;
+  for (const element of [...app.children, ...document.querySelectorAll('dialog')]) if (element instanceof HTMLElement && element.id !== 'toast') element.inert = false;
+  if (closeFocus?.isConnected) closeFocus.focus({ preventScroll: true });
+  closeFocus = undefined;
+});
+void bridge.bootstrap().then(state => {
+  applyState(state);
+  for (const update of startupUpdates.splice(0)) applyState(update);
+  if (state.recoveryNotices?.length) toast(state.recoveryNotices.join(' '), 16000);
+}).catch(error => toast(`无法读取工作区：${error.message}`));
 // Desktop acceptance tests use the public editor state; this does not expose filesystem access.
 (window as any).__editor = { active: activeEditor, execute, content: () => activeEditor()?.content, setContent: (content: string) => activeEditor()?.replace(content) };
