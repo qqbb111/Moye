@@ -1,7 +1,7 @@
 export type PrintLayout = 'portrait' | 'landscape-two-column';
 export interface PrintOptions { layout: PrintLayout; color: 'mono' | 'light'; codeFontPt: number; lineNumbers: boolean }
 export interface PrintPreferences { layout: PrintLayout; color: PrintOptions['color']; lineNumbers: boolean; fonts: Record<PrintLayout, number> }
-export type PdfPreviewResult = { ok: true; previewId: string; bytes: Uint8Array } | { ok: false; canceled?: boolean; message?: string };
+export type PdfPreviewResult = { ok: true; previewId: string; bytes: Uint8Array; missingImages: number } | { ok: false; canceled?: boolean; message?: string };
 export interface PdfFirstPage { requestId: string; documentId: string; bytes: Uint8Array }
 
 export function printPrefix(source: string): string | undefined {

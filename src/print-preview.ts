@@ -110,6 +110,7 @@ export class PrintPreview {
       if (!result.ok) { if (!result.canceled) throw new Error(result.message ?? '无法生成 PDF'); return; }
       if (await this.displayPdf(result.bytes, generation)) {
         this.id = result.previewId; this.dialog.dataset.previewId = this.id; this.get('#print-page-count').textContent = `${this.pdf!.numPages} 页`;
+        if (result.missingImages) this.message(`${result.missingImages} 张图片不可用，已在原位置标注。`);
         this.finishBusy(); this.get<HTMLButtonElement>('#print-save').disabled = false; this.get<HTMLSelectElement>('#print-zoom').disabled = false;
       }
     } catch (error) { if (generation === this.generation && this.dialog.open) { this.message(`预览失败：${(error as Error).message}`); this.finishBusy(); } }

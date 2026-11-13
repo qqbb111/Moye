@@ -46,7 +46,7 @@ async function inspectAbout(page) {
 async function runTargetedTests() {
   const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
   const output = path.join(scratch, 'test-results');
-  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|文楷主题离线';
+  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线';
   const code = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '--grep', grep, '--output', output], {
       cwd: root, env: { ...process.env, TYPORA_REPLICA_TEST_EXE: executablePath }, stdio: 'inherit', windowsHide: true,

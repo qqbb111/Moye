@@ -140,6 +140,37 @@ test('损坏的恢复记录可以从备份读取，损坏文件不覆盖有效�
   const { store, windowId } = await setup();
   try { const id = store.newDocument(windowId); store.update(windowId, id, '需要保留的草稿', 1); await store.flush(); await store.persist(); store.dispose(); await fs.writeFile(store.sessionPath, '{损坏的 JSON'); const restored = new DocumentStore(store.directory); await restored.initialize(); try { assert.equal(restored.view(windowId).documents[0].content, '需要保留的草稿'); await restored.persist(); assert.equal(JSON.parse(await fs.readFile(`${store.sessionPath}.bak`, 'utf8')).documents[0].content, '需要保留的草稿'); } finally { restored.dispose(); } } finally { store.dispose(); }
 });
+test('运行期间结构损坏的恢复文件不会覆盖最后一份有效备份', async () => {
+  const { directory, store, windowId } = await setup();
+  const primary = store.sessionPath;
+  const backup = `${primary}.bak`;
+  try {
+    const id = store.newDocument(windowId, '最后一份有效备份');
+    await store.flush();
+    store.update(windowId, id, '内存中的最新草稿', 1);
+    await store.flush();
+    const originalBackup = await fs.readFile(backup);
+    const damagedSnapshot = JSON.parse(await fs.readFile(primary, 'utf8'));
+    delete damagedSnapshot.documents[0].content;
+    const damagedBytes = Buffer.from(JSON.stringify(damagedSnapshot));
+    await fs.writeFile(primary, damagedBytes);
+
+    await store.persist();
+
+    assert.deepEqual(await fs.readFile(backup), originalBackup);
+    const preserved = (await fs.readdir(store.directory)).find(file => file.startsWith('workspace.json.damaged-'));
+    assert.ok(preserved);
+    assert.deepEqual(await fs.readFile(path.join(store.directory, preserved)), damagedBytes);
+    const restored = new DocumentStore(store.directory);
+    try {
+      await restored.initialize();
+      assert.equal(restored.documents.get(id)?.content, '内存中的最新草稿');
+    } finally { restored.dispose(); }
+  } finally {
+    store.dispose();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 test('主恢复文件与备份均损坏时保留原始字节，新草稿仍可写入并重启恢复', async () => {
   const { store } = await setup();
   const primary = Buffer.from([0x7b, 0xff, 0x00]);

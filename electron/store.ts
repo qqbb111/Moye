@@ -391,10 +391,7 @@ export class DocumentStore {
       try {
         const previous = await fs.readFile(this.sessionPath, 'utf8');
         let valid = true;
-        try {
-          const parsed = JSON.parse(previous) as Snapshot;
-          valid = parsed?.version === 1 && Array.isArray(parsed.documents) && Array.isArray(parsed.windows);
-        } catch { valid = false; }
+        try { parseSnapshot(previous); } catch { valid = false; }
         if (!valid) this.damagedRecoveryFiles.add(this.sessionPath);
         if (valid) await atomicWrite(`${this.sessionPath}.bak`, previous);
       } catch (error) { if (!missing(error)) throw error; }

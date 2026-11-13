@@ -656,6 +656,41 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
   } finally { await application.close(); }
 });
 
+test('打印缺图的文档时保留占位和正文，并能保存预览文件', async () => {
+  const { application, page, directory } = await launch();
+  try {
+    const file = path.join(directory, '打印.md');
+    const raw = '# 打印样例\n\nBEFORE_IMAGE\n\n![有效本地图](valid.png)\n\n![缺失本地图](missing.png)\n\n![网络图](https://example.invalid/image.png)\n\n![损坏的图片](damaged.png)\n\nAFTER_IMAGE';
+    await fs.writeFile(file, raw);
+    await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(directory, 'valid.png'));
+    await fs.writeFile(path.join(directory, 'damaged.png'), 'invalid image data');
+    await page.route('https://example.invalid/**', route => route.abort());
+    await application.evaluate((_electron, file) => { const api = (globalThis as any).__replicaTest; return api.openFile([...api.windows.keys()][0], file); }, file);
+    await expect.poll(() => content(page)).toBe(raw);
+    await execute(page, 'export-pdf');
+    await expect(page.locator('#print-status')).toHaveText('3 张图片不可用，已在原位置标注。', { timeout: 30000 });
+    await expect(page.locator('#print-save')).toBeEnabled();
+    const destination = path.join(directory, '打印.pdf');
+    await chooseSave(application, destination);
+    await page.locator('#print-save').click();
+    await expect(page.locator('#print-preview')).not.toBeVisible();
+    const { getDocument, OPS } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const pdf = getDocument({ data: new Uint8Array(await fs.readFile(destination)), useSystemFonts: true });
+    try {
+      const printed = await pdf.promise;
+      let text = '', images = 0;
+      for (let number = 1; number <= printed.numPages; number++) {
+        const sheet = await printed.getPage(number);
+        text += (await sheet.getTextContent()).items.map(item => 'str' in item ? item.str : '').join('');
+        images += (await sheet.getOperatorList()).fnArray.filter(op => op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject).length;
+      }
+      expect(text).toMatch(/BEFORE_IMAGE.*缺失本地图.*网络图.*损坏的图片.*AFTER_IMAGE/);
+      expect(images).toBe(1);
+    } finally { await pdf.destroy(); }
+    expect(await fs.readFile(file, 'utf8')).toBe(raw);
+  } finally { await application.close(); }
+});
+
 test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关闭后的缓存不可保存', async () => {
   const { application, page } = await launch();
   try {
@@ -679,7 +714,8 @@ test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关�
     await execute(page, 'new-window'); await expect.poll(() => application.windows().length).toBe(2); const other = application.windows().find(window => window !== page)!; await other.locator('.markdown-editor').waitFor();
     expect((await other.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
     expect((await other.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options })).ok).toBe(false);
-    const broken = await page.evaluate(({ id, options }) => window.rypota.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options }); expect(broken.ok).toBe(false); if (!broken.ok) expect(broken.message).toContain('图片解码失败');
+    const broken = await page.evaluate(({ id, options }) => window.rypota.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options });
+    expect(broken).toMatchObject({ ok: true, missingImages: 1 });
     await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
     const owner = await page.evaluate(async () => (await window.rypota.bootstrap()).windowId);
     const native = await application.browserWindow(page); await native.evaluate(window => window.close());

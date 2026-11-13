@@ -2,7 +2,8 @@ import { BrowserWindow, net, type PrintToPDFOptions } from 'electron';
 import { createHash, randomUUID } from 'node:crypto';
 import { printGeometry, type PrintOptions, type PdfPreviewResult } from '../shared/print';
 
-interface CachedPdf { id: string; documentId: string; title: string; path: string | null; bytes: Buffer; options: PrintOptions }
+interface PrintedPdf { bytes: Buffer; missingImages: number }
+interface CachedPdf extends PrintedPdf { id: string; documentId: string; title: string; path: string | null; options: PrintOptions }
 interface PrintJob { abort: AbortController; window?: BrowserWindow }
 interface Slot { epoch: number; tail: Promise<void>; value?: CachedPdf; job?: PrintJob }
 const cssString = (text: string) => '"' + text.replace(/["\\<\u0000-\u001f\u007f]/g, c => '\\' + (c.charCodeAt(0) || 0xfffd).toString(16) + ' ') + '"';
@@ -15,21 +16,34 @@ function stop(job?: PrintJob) {
 async function resolveImages(html: string, signal: AbortSignal) {
   if (!/<head>/i.test(html)) throw new Error('打印文档格式不正确');
   html = html.replace(/<head>/i, '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; font-src data:; style-src \'unsafe-inline\'; script-src \'none\'; base-uri \'none\'; form-action \'none\'">');
-  const imageSources = [...html.matchAll(/<img\b[^>]*?\ssrc="([^"]+)"/gi)].map(match => match[1]);
-  if (imageSources.some(url => /^https?:\/\//i.test(url))) throw new Error('打印前请用「插入图片」将网络图片导入为附件');
-  const urls = [...new Set(imageSources.filter(url => /^replica-media:/i.test(url)))];
-  for (let index = 0; index < urls.length; index += 4) {
-    const images = await Promise.all(urls.slice(index, index + 4).map(async url => {
-      const response = await net.fetch(url.replaceAll('&amp;', '&'), { signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
-      if (!response.ok) throw new Error('图片无法加载，请检查文档中的图片地址');
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length > 20 * 1024 * 1024) throw new Error('图片过大，无法生成打印预览');
-      return { url, data: 'data:' + (response.headers.get('content-type') ?? 'image/png') + ';base64,' + bytes.toString('base64') };
+  const imageTag = /<img\b(?:[^"'>]|"[^"]*"|'[^']*')*>/gi;
+  const attributes = /\s+([^\s=/>]+)(?:="([^"]*)"|='([^']*)')?/g;
+  const urls = new Set<string>();
+  for (const [tag] of html.matchAll(imageTag)) for (const [, name, double, single] of tag.matchAll(attributes)) {
+    const url = double ?? single;
+    if (name.toLowerCase() === 'src' && url && /^replica-media:/i.test(url)) urls.add(url);
+  }
+  const sources = [...urls];
+  const embedded = new Map<string, string>();
+  for (let index = 0; index < sources.length; index += 4) {
+    await Promise.all(sources.slice(index, index + 4).map(async url => {
+      try {
+        const response = await net.fetch(url.replaceAll('&amp;', '&'), { signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
+        const mime = response.headers.get('content-type');
+        if (!response.ok || !mime?.startsWith('image/')) return;
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.length <= 20 * 1024 * 1024) embedded.set(url, `data:${mime};base64,${bytes.toString('base64')}`);
+      } catch { signal.throwIfAborted(); }
     }));
     signal.throwIfAborted();
-    for (const image of images) html = html.replaceAll(image.url, image.data);
   }
-  return html;
+  return html.replace(imageTag, tag => tag.replace(attributes, (attribute, name: string, double?: string, single?: string) => {
+    if (name.toLowerCase() !== 'src') return attribute;
+    const url = double ?? single ?? '';
+    const data = embedded.get(url);
+    if (data) return ` src="${data}"`;
+    return /^data:image\//i.test(url) ? attribute : '';
+  }));
 }
 
 async function print(html: string, title: string, options: PrintOptions, job: PrintJob, firstPage = false) {
@@ -48,12 +62,21 @@ async function print(html: string, title: string, options: PrintOptions, job: Pr
   signal.throwIfAborted();
   const maxHeight = (geometry.heightMm - geometry.topMm - geometry.bottomMm) * 96 / 25.4;
   const columnWidth = options.layout === 'portrait' ? width : (width - geometry.columnGapMm * 96 / 25.4) / 2;
-  const problem = await window.webContents.executeJavaScript(`(async () => {
+  const missingImages = await window.webContents.executeJavaScript(`(async () => {
     try {
       await document.fonts.ready;
       const images = Array.from(document.images);
       await Promise.all(images.map(image => image.decode().catch(() => {})));
-      if (images.some(image => !image.naturalWidth)) throw Error('图片解码失败');
+      let missingImages = 0;
+      for (const image of images) {
+        if (image.naturalWidth) continue;
+        const placeholder = document.createElement('span');
+        placeholder.className = 'print-missing-image';
+        const alt = image.alt.trim();
+        placeholder.textContent = alt ? '图片不可用 · ' + alt : '图片不可用';
+        (image.closest('picture') ?? image).replaceWith(placeholder);
+        missingImages++;
+      }
       const context = document.createElement('canvas').getContext('2d');
       context.font = '8pt "Microsoft YaHei","Segoe UI",sans-serif';
       const title = ${JSON.stringify(title)};
@@ -87,22 +110,24 @@ async function print(html: string, title: string, options: PrintOptions, job: Pr
           if (lead.getBoundingClientRect().height > maxHeight) lead.classList.add('tall-line');
         }
       }
+      return missingImages;
     } catch (error) { return error.message; }
   })()`);
-  if (typeof problem === 'string') throw new Error(problem);
+  if (typeof missingImages !== 'number') throw new Error(String(missingImages));
   signal.throwIfAborted();
   const printOptions: PrintToPDFOptions = {
     pageSize: 'A4', landscape: options.layout !== 'portrait', printBackground: true, scale: 1, displayHeaderFooter: false, generateTaggedPDF: false,
     margins: { top: geometry.topMm / 25.4, bottom: geometry.bottomMm / 25.4, left: geometry.sideMm / 25.4, right: geometry.sideMm / 25.4 },
     ...(firstPage ? { pageRanges: '1' } : {}),
   };
-  return window.webContents.printToPDF(printOptions);
+  const bytes = await window.webContents.printToPDF(printOptions);
+  return { bytes, missingImages };
 }
 
 export class PdfPreviews {
   private slots = new Map<string, Slot>();
   private firstPages = new Map<string, { requestId: string; job: PrintJob }>();
-  private recent = new Map<string, Map<string, Buffer>>();
+  private recent = new Map<string, Map<string, PrintedPdf>>();
 
   private releaseFirstPage(owner: string, requestId?: string) {
     const first = this.firstPages.get(owner);
@@ -128,7 +153,7 @@ export class PdfPreviews {
     this.firstPages.set(owner, first);
     try {
       html = await resolveImages(html, job.abort.signal);
-      const bytes = await print(html, title, options, job, true);
+      const { bytes } = await print(html, title, options, job, true);
       if (this.firstPages.get(owner) === first) deliver(new Uint8Array(bytes));
     } catch {
       // The optional first page may be canceled or omit a definition used by
@@ -156,17 +181,18 @@ export class PdfPreviews {
       if (!current()) return { ok: false, canceled: true };
       const key = createHash('sha256').update(JSON.stringify([document.id, document.title, document.path, options])).update(html).digest('hex');
       let recent = this.recent.get(owner);
-      const cached = recent?.get(key), bytes = cached ?? await print(html, document.title, options, job);
+      const printed = recent?.get(key) ?? await print(html, document.title, options, job);
       if (!current()) return { ok: false, canceled: true };
       const id = randomUUID();
-      slot.value = { id, documentId: document.id, title: document.title, path: document.path, bytes, options };
+      const { bytes, missingImages } = printed;
+      slot.value = { id, documentId: document.id, title: document.title, path: document.path, ...printed, options };
       if (bytes.length <= 16 * 1024 * 1024) {
         if (!recent) this.recent.set(owner, recent = new Map());
         recent.delete(key);
-        recent.set(key, bytes);
-        while (recent.size > 4 || [...recent.values()].reduce((sum, pdf) => sum + pdf.length, 0) > 32 * 1024 * 1024) recent.delete(recent.keys().next().value!);
+        recent.set(key, printed);
+        while (recent.size > 4 || [...recent.values()].reduce((sum, pdf) => sum + pdf.bytes.length, 0) > 32 * 1024 * 1024) recent.delete(recent.keys().next().value!);
       }
-      return { ok: true, previewId: id, bytes: new Uint8Array(bytes) };
+      return { ok: true, previewId: id, bytes: new Uint8Array(bytes), missingImages };
     } catch (error) { return current() ? { ok: false, message: (error as Error).message } : { ok: false, canceled: true }; }
     finally {
       if (requestId) this.releaseFirstPage(owner, requestId);
