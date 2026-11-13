@@ -192,18 +192,21 @@ $('#tabbar').ondrop = event => {
   endTabDrag(); if (!valid || !workspace.documents.some(doc => doc.id === moved)) return;
   moveTab(moved, before);
 };
+const tabStrip = $('#tabs');
 $('#tabbar').addEventListener('wheel', event => {
-  const strip = $('#tabs');
-  if (event.ctrlKey || event.metaKey || !event.cancelable || draggedTab || strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
-  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? strip.clientWidth : 1;
-  event.preventDefault();
-  strip.scrollLeft += event.deltaY * unit;
+  if (event.ctrlKey || event.metaKey || event.shiftKey || draggedTab || event.deltaX || !event.deltaY) return;
+  if (tabStrip.scrollWidth <= tabStrip.clientWidth) return;
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? tabStrip.clientWidth : 1;
+  if (event.cancelable) event.preventDefault();
+  tabStrip.scrollLeft -= event.deltaY * unit;
 }, { passive: false });
 function renderTabs() {
-  if (draggedTab || holdInlineRename($('#tabs'))) return;
+  if (draggedTab || holdInlineRename(tabStrip)) return;
   const signature = JSON.stringify([workspace.activeId, workspace.documents.map(item => [item.id, item.title, item.path, item.dirty])]);
   if (signature === tabSignature) return; tabSignature = signature;
-  $('#tabs').replaceChildren();
+  const previousActive = tabStrip.querySelector<HTMLElement>('.tab.active')?.dataset.id;
+  const scrollLeft = tabStrip.scrollLeft;
+  tabStrip.replaceChildren();
   for (const item of workspace.documents) {
     const tab = document.createElement('div'); tab.className = `tab ${item.id === workspace.activeId ? 'active' : ''}`; tab.role = 'tab'; tab.dataset.id = item.id; tab.id = `document-tab-${item.id}`; tab.setAttribute('aria-controls', `document-panel-${item.id}`); tab.setAttribute('aria-label', item.title); tab.setAttribute('aria-selected', String(item.id === workspace.activeId)); tab.tabIndex = item.id === workspace.activeId ? 0 : -1; tab.title = item.path ?? '本地草稿'; tab.draggable = false;
     const label = document.createElement('span'); label.className = 'tab-label'; label.textContent = item.title + (item.dirty && item.path ? ' ●' : ''); const close = document.createElement('button'); close.className = 'tab-close'; close.tabIndex = item.id === workspace.activeId ? 0 : -1; close.innerHTML = icon('close'); close.draggable = false; close.title = `关闭 ${item.title}`; close.setAttribute('aria-label', `关闭 ${item.title}`); close.onclick = event => { event.stopPropagation(); flushAll(); void run(() => bridge.closeDocument(item.id)); };
@@ -257,7 +260,16 @@ function renderTabs() {
     };
     tab.ondragstart = event => { if (!event.dataTransfer || (event.target as HTMLElement).closest('.tab-close')) { event.preventDefault(); return; } draggedTab = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-replica-tab', item.id); const box = tab.getBoundingClientRect(); floatTab(tab, event.clientX || box.left + box.width / 2, event.clientY || box.top + box.height / 2); };
     tab.ondragend = endTabDrag;
-    $('#tabs').append(tab);
+    tabStrip.append(tab);
+  }
+  tabStrip.scrollLeft = scrollLeft;
+  if (previousActive !== workspace.activeId) {
+    const active = tabStrip.querySelector<HTMLElement>('.tab.active');
+    if (!active) return;
+    const tab = active.getBoundingClientRect();
+    const strip = tabStrip.getBoundingClientRect();
+    if (tab.left < strip.left) tabStrip.scrollLeft += tab.left - strip.left;
+    else if (tab.right > strip.right) tabStrip.scrollLeft += tab.right - strip.right;
   }
 }
 window.addEventListener('blur', () => cancelTabPointer?.());

@@ -252,10 +252,10 @@ dialog:focus-visible { outline: none; }
 .window-controls button { width: 44px; }
 .window-controls button:focus-visible { outline-offset: -4px; }
 #tabbar { height: 43px; padding: 0 14px; gap: 7px; border-color: color-mix(in srgb, var(--border) 60%, transparent); }
-#tabs { position: relative; gap: 5px; padding: 6px 0; }
+#tabs { position: relative; gap: 5px; padding: 6px 0; overflow-y: hidden; }
 .tab { min-width: 140px; max-width: 230px; border: 0; border-radius: 6px; padding: 0 7px 0 10px; position: relative; }
 .tab.active { border: 0; background: color-mix(in srgb, var(--ui-accent) 10%, var(--bg)); }
-.tab.active::after { content: ''; position: absolute; left: 13px; right: 13px; bottom: -6px; height: 2px; background: var(--ui-accent); border-radius: 2px; }
+.tab[aria-selected=true]::after { content: ''; position: absolute; left: 13px; right: 13px; bottom: 2px; height: 2px; background: var(--ui-accent); border-radius: 2px; pointer-events: none; }
 .tab.dragging { position: absolute; min-width: 0; max-width: none; flex: none; margin: 0; opacity: 0; pointer-events: none; }
 .tab.dragging::after { display: none; }
 .tab-drag-preview { position: fixed; z-index: 60; display: flex; align-items: center; gap: 0; padding: 0 7px 0 10px; border-radius: 6px; color: var(--fg); font: 12px/1.4 var(--ui-font); opacity: 1; pointer-events: none; background: color-mix(in srgb, var(--ui-accent) 12%, var(--chrome)); box-shadow: 0 8px 24px #0004, 0 0 0 1px color-mix(in srgb, var(--ui-accent) 35%, transparent); }

@@ -1790,21 +1790,41 @@ test('溢出标签栏可用鼠标滚轮和横向滚动翻看，保留选中项�
     const strip = page.locator('#tabs');
     const add = page.getByRole('button', { name: '新建标签页' });
     const addBox = await add.boundingBox();
-    const selected = await page.locator('.tab.active').getAttribute('data-id');
+    const active = page.getByRole('tab', { selected: true });
+    const selected = (await active.getAttribute('data-id'))!;
     const position = () => strip.evaluate(element => element.scrollLeft);
-    await strip.evaluate(element => { element.scrollLeft = 0; });
+    const lastTabIsVisible = () => page.locator('.tab').last().evaluate(tab => tab.getBoundingClientRect().right <= tab.parentElement!.getBoundingClientRect().right + 1);
+    const end = await strip.evaluate(element => element.scrollWidth - element.clientWidth);
+    expect(end).toBeGreaterThan(0);
+    await expect.poll(lastTabIsVisible).toBe(true);
+    await expect(active).toHaveCSS('position', 'relative');
+    await expect.poll(() => active.evaluate(tab => getComputedStyle(tab, '::after').bottom)).toBe('2px');
+
     await strip.hover();
-    await page.mouse.wheel(0, 600);
-    await expect.poll(position).toBeGreaterThan(0);
-    await expect(page.locator('.tab.active')).toHaveAttribute('data-id', selected!);
+    await page.mouse.wheel(0, 120);
+    await expect.poll(position).toBeLessThan(end - 50);
+    for (let index = 0; index < Math.ceil(end / 120); index++) await page.mouse.wheel(0, 120);
+    await expect.poll(position).toBe(0);
+    await expect(active).toHaveAttribute('data-id', selected);
+    expect(await active.evaluate(tab => tab.getBoundingClientRect().left >= tab.parentElement!.getBoundingClientRect().right)).toBe(true);
     expect(await add.boundingBox()).toEqual(addBox);
 
+    await page.evaluate(id => window.rypota.renameDocument({ id }, '更新中的当前标签'), selected);
+    await expect(active).toHaveAccessibleName('更新中的当前标签');
+    expect(await position()).toBe(0);
+
     await add.hover();
-    await page.mouse.wheel(0, -2000);
-    await expect.poll(position).toBe(0);
+    for (let index = 0; index <= Math.ceil(end / 120); index++) await page.mouse.wheel(0, -120);
+    await expect.poll(lastTabIsVisible).toBe(true);
+    await expect(active).toHaveAttribute('data-id', selected);
     await strip.hover();
-    await page.mouse.wheel(300, 0);
-    await expect.poll(position).toBeGreaterThan(0);
+    const rightEdge = await position();
+    await page.mouse.wheel(-300, 0);
+    await expect.poll(position).toBeLessThan(rightEdge);
+
+    await execute(page, 'next-tab');
+    await expect(page.getByRole('tab', { selected: true })).toHaveAttribute('data-id', (await page.locator('.tab').first().getAttribute('data-id'))!);
+    await expect.poll(position).toBe(0);
 
     await add.click();
     await expect(page.locator('.tab')).toHaveCount(11);
