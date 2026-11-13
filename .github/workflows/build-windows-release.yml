@@ -1,0 +1,56 @@
+name: Publishable Moye 0.9.16 Windows ZIP
+on:
+  push:
+    branches: [release-build-v0.9.16]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 160d79ee56d02dff77c40a2f5e5e6a24f6adaba6
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Verify the release source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ((git rev-parse HEAD) -ne '160d79ee56d02dff77c40a2f5e5e6a24f6adaba6') { throw 'Unexpected source commit' }
+          if ((node -p "require('./package.json').version") -ne '0.9.16') { throw 'Unexpected app version' }
+          npm ci --no-audit --no-fund
+          npm test
+      - name: Build and test the exact ZIP to be uploaded
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm run package:zip
+          node scripts/smoke-release.mjs release/Moye-0.9.16-windows-x64.zip --targeted
+      - name: Upload verified bytes to the existing draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $release = gh api repos/qqbb111/Moye/releases/443870720 | ConvertFrom-Json
+          if (!$release.draft -or $release.tag_name -ne 'v0.9.16') { throw 'Unexpected draft release' }
+          $zip = Get-Item -LiteralPath 'release/Moye-0.9.16-windows-x64.zip'
+          $sha = (Get-FileHash -LiteralPath $zip.FullName).Hash.ToLowerInvariant()
+          $existing = @(gh api repos/qqbb111/Moye/releases/443870720/assets | ConvertFrom-Json | Where-Object name -eq $zip.Name)
+          foreach ($asset in $existing) {
+            if ($asset.state -ne 'starter' -or $asset.id -ne 742482946) { throw 'Unexpected existing ZIP asset' }
+            gh api -X DELETE "repos/qqbb111/Moye/releases/assets/$($asset.id)"
+          }
+          gh release upload v0.9.16 $zip.FullName --repo qqbb111/Moye
+          $asset = gh api repos/qqbb111/Moye/releases/443870720/assets | ConvertFrom-Json | Where-Object name -eq $zip.Name
+          if ($asset.state -ne 'uploaded' -or $asset.size -ne $zip.Length -or $asset.digest -ne "sha256:$sha") { throw 'Release asset does not match tested ZIP' }
+          "Verified $($asset.name) $($asset.size) bytes $($asset.digest)" >> $env:GITHUB_STEP_SUMMARY
