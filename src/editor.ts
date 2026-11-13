@@ -538,13 +538,33 @@ function deleteParagraphBoundary(view: EditorView, backward: boolean): boolean {
   return true;
 }
 function orderedBodyAt(view: EditorView, line: Element | null) {
-  const marker = line && Array.from(line.querySelectorAll('.md-list-number')).at(-1);
-  if (!marker) return undefined;
-  const from = view.posAtDOM(marker);
-  const row = view.state.doc.lineAt(from);
-  const prefix = /^\d+[.)][ \t]*/.exec(row.text.slice(from - row.from));
-  return prefix && { row, position: from + prefix[0].length };
+  const markers = line?.querySelectorAll('.md-list-number');
+  if (!markers?.length) return undefined;
+  const from = view.posAtDOM(markers[0]), last = view.posAtDOM(markers[markers.length - 1]);
+  const row = view.state.doc.lineAt(last);
+  const prefix = /^\d+[.)][ \t]*/.exec(row.text.slice(last - row.from));
+  return prefix && { from, row, position: last + prefix[0].length };
 }
+const orderedMouseSelection = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (!(event.target instanceof Element) || event.button !== 0 || event.detail > 1 || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return null;
+  const body = orderedBodyAt(view, event.target.closest('.cm-line'));
+  if (!body || view.posAtCoords({ x: event.clientX, y: event.clientY }, false) >= body.position) return null;
+  let { from, position } = body;
+  return {
+    get(current) {
+      const head = view.posAtCoords({ x: current.clientX, y: current.clientY }, false);
+      // A click in the marker gutter puts the caret in prose. Once the
+      // pointer reaches prose, select from the original Markdown marker.
+      if (head >= from && head <= position) return EditorSelection.single(position);
+      return EditorSelection.single(head < from ? position : from, head);
+    },
+    update(update) {
+      if (!update.docChanged) return;
+      from = update.changes.mapPos(from);
+      position = update.changes.mapPos(position);
+    },
+  };
+});
 function moveToOrderedBoundary(view: EditorView, key: 'Home' | 'ArrowLeft') {
   const { main, ranges } = view.state.selection;
   if (!main.empty || ranges.length !== 1 || view.compositionStarted) return false;
@@ -607,21 +627,29 @@ export class MarkdownEditor {
       const selection = transaction.selection;
       if (!selection || transaction.docChanged || transaction.startState.field(sourceField) || transaction.effects.some(effect => effect.is(sourceEffect))) return transaction;
       const decorations = transaction.startState.field(preview).decorations;
-      const bodyPosition = (position: number) => {
-        for (const marker = decorations.iter(position); marker.value && marker.from <= position; marker.next()) {
+      const markerBoundary = (offset: number) => {
+        let from = offset, to = offset;
+        for (const marker = decorations.iter(offset); marker.value && marker.from <= to; marker.next()) {
           const widget = marker.value.spec.widget;
-          if (widget instanceof InlineWidget && widget.kind === 'list-number' && position < marker.to) position = marker.to;
+          if (widget instanceof InlineWidget && widget.kind === 'list-number' && to < marker.to) {
+            from = Math.min(from, marker.from);
+            to = marker.to;
+          }
         }
-        return position;
+        return { from, to };
       };
       const ranges = selection.ranges.map(range => {
-        if (range.undirectional || (!range.empty && range.from === 0 && range.to === transaction.startState.doc.length)) return range;
-        const anchor = bodyPosition(range.anchor), head = bodyPosition(range.head);
+        if (range.undirectional) return range;
+        const start = markerBoundary(range.from), end = markerBoundary(range.to);
+        if (range.empty || range.to <= start.to) return start.to === range.head ? range : EditorSelection.cursor(start.to, 1);
+        // Pointer ranges may include a whole marker together with prose.
+        // Keyboard extension still stops at the editable start of the body.
+        const from = transaction.isUserEvent('select.pointer') ? start.from :
+          (range.from === 0 && range.to === transaction.startState.doc.length ? range.from : start.to);
+        const to = transaction.isUserEvent('select.pointer') ? end.from : end.to;
+        const [anchor, head] = range.anchor < range.head ? [from, to] : [to, from];
         if (anchor === range.anchor && head === range.head) return range;
-        // A range may cross a list marker, but its endpoints must be editable.
-        return anchor === head
-          ? EditorSelection.cursor(head, 1)
-          : EditorSelection.range(anchor, head, range.goalColumn, range.bidiLevel ?? undefined, range.assoc);
+        return EditorSelection.range(anchor, head, range.goalColumn, range.bidiLevel ?? undefined, range.assoc);
       });
       if (ranges.every((range, index) => range === selection.ranges[index])) return transaction;
       return [transaction, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
@@ -636,17 +664,9 @@ export class MarkdownEditor {
       return false;
     } });
     bindings.push({ key: 'Delete', run: view => deleteParagraphBoundary(view, false), preventDefault: false });
-    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
+    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), orderedMouseSelection, highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
       EditorView.updateListener.of(update => { if (update.docChanged && !update.state.field(compositionField)) host.changed(update.state.doc.toString()); }),
       EditorView.domEventHandlers({
-        mousedown(event, view) {
-          if (!(event.target instanceof Element) || event.button !== 0 || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
-          const body = orderedBodyAt(view, event.target.closest('.cm-line'));
-          if (!body || view.posAtCoords({ x: event.clientX, y: event.clientY }, false) >= body.position) return false;
-          view.dispatch({ selection: { anchor: body.position } });
-          view.focus();
-          return true;
-        },
         compositionstart(event, view) { if (event.isTrusted && view.hasFocus) { compositionSequence++; view.dispatch({ effects: compositionEffect.of(true) }); } return false; },
         compositionend(_event, view) { if (view.state.field(compositionField)) finishComposition(view, compositionSequence); return false; },
         click(event) { const target = (event.target as HTMLElement).closest<HTMLElement>('[data-href]'); if (target && (event.ctrlKey || event.metaKey)) { event.preventDefault(); host.link(target.dataset.href!); return true; } return false; }

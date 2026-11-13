@@ -104,6 +104,8 @@ details > summary:hover { background: var(--hover); }
   max-width: var(--reading-width); width: 100%; padding: 38px 42px 180px !important;
 }
 :root[data-theme] .markdown-editor > .cm-scroller > .cm-content > .cm-line { line-height: 1.8; min-height: 1.8em; }
+/* Keep native IME underlines on their own characters when adjacent letters form a ligature. */
+.markdown-editor[data-source='false'] > .cm-scroller > .cm-content > .cm-line { font-variant-ligatures: no-common-ligatures; }
 :root[data-theme] .markdown-editor > .cm-scroller > .cm-content > .cm-line:has(> br:only-child) { line-height: 1em !important; min-height: 1em; }
 :root[data-theme] .md-heading { border: 0; line-height: 1.4 !important; font-weight: 700; }
 :root[data-theme] .md-heading span { font-weight: inherit !important; }

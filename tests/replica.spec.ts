@@ -1063,6 +1063,42 @@ test('有序列表按列表起点连续显示，保留全 1 源码并支持嵌�
   } finally { await application.close(); }
 });
 
+test('组合输入一个 f 时，相邻的已输入字母各自保留字形宽度', async () => {
+  const { application, page } = await launch();
+  try {
+    const raw = '1. ffafa 中文';
+    const body = raw.indexOf('ffafa');
+    await setContent(page, raw);
+    await page.evaluate(async body => {
+      const editor = (window as any).__editor.active();
+      editor.view.dispatch({ selection: { anchor: body } });
+      editor.focus();
+      await document.fonts.ready;
+    }, body);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'f', selectionStart: 1, selectionEnd: 1 });
+    await expect.poll(() => content(page)).toBe('1. fffafa 中文');
+    const measured = await page.evaluate(body => {
+      const view = (window as any).__editor.active().view;
+      const native = window.getSelection()!;
+      const widths = [body, body + 1, body + 2].map(position => {
+        const { node, offset } = view.domAtPos(position + 1, -1);
+        const range = document.createRange();
+        range.setStart(node, offset - 1);
+        range.setEnd(node, offset);
+        return range.getBoundingClientRect().width;
+      });
+      return { head: view.state.selection.main.head, active: native.anchorNode?.textContent, widths };
+    }, body);
+    expect(measured.head).toBe(body + 1);
+    expect(measured.active).toBe('f');
+    expect(Math.min(...measured.widths)).toBeGreaterThan(0);
+    expect(Math.max(...measured.widths) - Math.min(...measured.widths)).toBeLessThan(1);
+    await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
+    await expect.poll(() => content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
 test('有序列表正文起点显示拼音、保留光标，编辑列表标题时露出标题标记', async () => {
   const { application, page } = await launch();
   try {
@@ -1213,6 +1249,54 @@ test('有序列表的隐藏编号不能成为选区，正文、跨行和源码�
     expect(await selected()).toEqual({ from: body - 1, to: body });
     await page.keyboard.press('Control+a');
     expect(await selected()).toEqual({ from: 0, to: raw.length });
+  } finally { await application.close(); }
+});
+
+test('有序列表可以正向或反向拖选整项，复制和剪切包含编号', async () => {
+  const { application, page } = await launch();
+  try {
+    const raw = '1. 第一项\n1. 第二项\n1. 第三项\n\n结尾';
+    const itemStart = raw.indexOf('1. 第二项');
+    const itemEnd = raw.indexOf('\n1. 第三项');
+    await setContent(page, raw);
+    const drag = async (reverse: boolean) => {
+      const points = await page.evaluate(itemEnd => {
+        const view = (window as any).__editor.active().view;
+        const marker = view.contentDOM.querySelectorAll('.md-list-number')[1].getBoundingClientRect();
+        const end = view.coordsAtPos(itemEnd, -1);
+        return { marker: { x: marker.left + 1, y: marker.top + marker.height / 2 }, end: { x: end.left + 7, y: (end.top + end.bottom) / 2 } };
+      }, itemEnd);
+      const [from, to] = reverse ? [points.end, points.marker] : [points.marker, points.end];
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 12 });
+      await page.mouse.up();
+    };
+    const selected = () => page.evaluate(() => {
+      const { anchor, head } = (window as any).__editor.active().view.state.selection.main;
+      return { anchor, head };
+    });
+    await application.evaluate(({ clipboard }) => {
+      clipboard.writeText = async (value: string) => { (globalThis as any).__copiedListItem = value; };
+    });
+    const copied = () => application.evaluate(() => (globalThis as any).__copiedListItem);
+
+    await drag(false);
+    expect(await selected()).toEqual({ anchor: itemStart, head: itemEnd });
+    await page.keyboard.press('Control+c');
+    await expect.poll(copied).toBe('1. 第二项');
+    await drag(true);
+    expect(await selected()).toEqual({ anchor: itemEnd, head: itemStart });
+    await page.keyboard.press('Control+x');
+    await expect.poll(() => content(page)).toBe(raw.slice(0, itemStart) + raw.slice(itemEnd));
+    expect(await copied()).toBe('1. 第二项');
+    await page.keyboard.press('Control+z');
+    expect(await content(page)).toBe(raw);
+    await drag(false);
+    await page.keyboard.insertText('普通段落');
+    expect(await content(page)).toBe(raw.slice(0, itemStart) + '普通段落' + raw.slice(itemEnd));
+    await page.keyboard.press('Control+z');
+    expect(await content(page)).toBe(raw);
   } finally { await application.close(); }
 });
 
