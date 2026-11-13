@@ -1009,6 +1009,7 @@ sidebarResize.onkeydown = event => {
 sidebarResize.ondblclick = () => void run(() => bridge.updatePreferences({ sidebarWidth: 256 }));
 $('#quick-open').addEventListener('close', () => requestAnimationFrame(() => { if (!document.querySelector('dialog[open]')) activeEditor()?.focus(); }));
 $('#settings-open').onmousedown = event => event.preventDefault();
+$('#settings-open').onclick = event => settings.open('常规', event.detail > 0);
 bridge.onState(applyState); bridge.onCommand(command => void execute(command)); bridge.onMessage(toast); bridge.onPrepareClose(async token => { await Promise.allSettled([...pendingImages]); flushAll(); await settings.flush(); bridge.finishClose(token); });
 void bridge.bootstrap().then(applyState).catch(error => toast(`无法读取工作区：${error.message}`));
 // Desktop acceptance tests use the public editor state; this does not expose filesystem access.

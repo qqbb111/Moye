@@ -256,6 +256,55 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
   } finally { await application.close(); }
 });
 
+test('设置分类的鼠标点击和拖动不高亮文字，键盘焦点仍清晰可见', async () => {
+  const { application, page } = await launch();
+  try {
+    const settings = page.getByRole('button', { name: '设置', exact: true });
+    const general = page.getByRole('tab', { name: '常规', exact: true });
+    const shortcuts = page.getByRole('tab', { name: '快捷键', exact: true });
+    await settings.click();
+    await expect(general).toBeFocused();
+    await expect(general).toHaveCSS('outline-style', 'none');
+    await expect(general).toHaveCSS('box-shadow', 'none');
+    await page.locator('#preferences').evaluate(async dialog => {
+      await Promise.all(dialog.getAnimations().map(animation => animation.finished));
+    });
+
+    await shortcuts.click();
+    await expect(shortcuts).toHaveAttribute('aria-selected', 'true');
+    await expect(shortcuts).toHaveCSS('box-shadow', 'none');
+    const bounds = await shortcuts.boundingBox();
+    if (!bounds) throw new Error('快捷键分类不可见');
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(bounds.x + 4, y);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width - 4, y, { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.press('Control+a');
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(general).toBeFocused();
+    await expect(general).toHaveAttribute('aria-selected', 'true');
+    await expect(general).not.toHaveCSS('box-shadow', 'none');
+    await expect(general).toHaveCSS('outline-style', 'none');
+    await page.keyboard.press('ArrowRight');
+    await expect(shortcuts).toBeFocused();
+    await expect(shortcuts).not.toHaveCSS('box-shadow', 'none');
+    await shortcuts.click();
+    await expect(shortcuts).toHaveCSS('box-shadow', 'none');
+
+    const search = page.getByRole('searchbox', { name: '搜索快捷键' });
+    await search.fill('关闭文档');
+    await search.press('Control+a');
+    expect(await search.evaluate(input => [(input as HTMLInputElement).selectionStart, (input as HTMLInputElement).selectionEnd])).toEqual([0, 4]);
+    await page.getByRole('button', { name: '关闭设置' }).click();
+    await page.keyboard.press('Control+,');
+    await expect(general).toBeFocused();
+    await expect(general).not.toHaveCSS('box-shadow', 'none');
+  } finally { await application.close(); }
+});
+
 test('2026 代码主题独立于正文主题，设置文字不可拖选而输入框仍可选', async () => {
   const { application, page } = await launch();
   try {
@@ -1096,6 +1145,74 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
     await select(heading.indexOf('<-'));
     await expect(title.locator('.md-heading-marker')).toHaveText('#');
     expect(await content(page)).toBe(heading);
+  } finally { await application.close(); }
+});
+
+test('有序列表的隐藏编号不能成为选区，正文、跨行和源码仍可选择', async () => {
+  const { application, page } = await launch();
+  try {
+    const raw = '1. 第一项\n1. 第二项\n1. vscode 代码块主题\n\n结尾';
+    const firstBody = raw.indexOf('第一项');
+    const body = raw.indexOf('vscode');
+    const precedingEnd = raw.indexOf('\n1. vscode');
+    await setContent(page, raw);
+    const select = (anchor: number, head = anchor) => page.evaluate(({ anchor, head }) => {
+      const editor = (window as any).__editor.active();
+      editor.view.dispatch({ selection: { anchor, head } });
+      editor.focus();
+    }, { anchor, head });
+    const selected = () => page.evaluate(() => {
+      const { from, to } = (window as any).__editor.active().view.state.selection.main;
+      return { from, to };
+    });
+
+    await select(body);
+    await page.keyboard.press('Shift+ArrowLeft');
+    expect(await selected()).toEqual({ from: body, to: body });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
+    await expect.poll(() => content(page)).toBe(raw.replace('vscode', 'pinvscode'));
+    await cdp.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 });
+    await expect.poll(() => content(page)).toBe(raw);
+    await expect.poll(() => page.evaluate(() => (window as any).__editor.active().view.compositionStarted)).toBe(false);
+    await page.keyboard.press('x');
+    expect(await content(page)).toBe(raw.replace('vscode', 'xvscode'));
+    await page.keyboard.press('Control+z');
+    expect(await content(page)).toBe(raw);
+
+    await select(body);
+    await page.keyboard.press('Shift+ArrowLeft');
+    await cdp.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
+    await cdp.send('Input.insertText', { text: '拼' });
+    await expect.poll(async () => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content)).toBe(raw.replace('vscode', '拼vscode'));
+    await page.keyboard.press('Control+z');
+    expect(await content(page)).toBe(raw);
+
+    await select(body + 2);
+    await page.keyboard.press('Shift+ArrowLeft');
+    await page.keyboard.press('Shift+Home');
+    expect(await selected()).toEqual({ from: body, to: body + 2 });
+    await page.keyboard.press('Shift+ArrowLeft');
+    expect(await selected()).toEqual({ from: body, to: body + 2 });
+    await page.keyboard.press('Shift+ArrowRight');
+    expect(await selected()).toEqual({ from: body + 1, to: body + 2 });
+    await page.keyboard.press('Shift+ArrowRight');
+    expect(await selected()).toEqual({ from: body + 2, to: body + 2 });
+
+    await select(precedingEnd - 2, body + 2);
+    expect(await selected()).toEqual({ from: precedingEnd - 2, to: body + 2 });
+    await select(body + 2, precedingEnd - 2);
+    expect(await selected()).toEqual({ from: precedingEnd - 2, to: body + 2 });
+    await select(firstBody);
+    await page.keyboard.press('Control+a');
+    expect(await selected()).toEqual({ from: 0, to: raw.length });
+
+    await execute(page, 'toggle-source');
+    await select(body);
+    await page.keyboard.press('Shift+ArrowLeft');
+    expect(await selected()).toEqual({ from: body - 1, to: body });
+    await page.keyboard.press('Control+a');
+    expect(await selected()).toEqual({ from: 0, to: raw.length });
   } finally { await application.close(); }
 });
 

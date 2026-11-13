@@ -48,6 +48,9 @@ export class Settings {
       </section>
       <p id="shortcut-message" role="status" hidden></p>`;
     document.body.append(this.dialog);
+    // Scripted focus on a tab can inherit the editor's keyboard focus state.
+    this.dialog.addEventListener('pointerdown', () => this.dialog.toggleAttribute('data-pointer-focus', true), true);
+    this.dialog.addEventListener('keydown', () => this.dialog.removeAttribute('data-pointer-focus'), true);
     this.dialog.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => {
       button.onclick = () => { this.hideHelp(); this.section = button.dataset.section!; this.recording = null; this.message(''); this.render(); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) this.get('#settings-panel').animate([{ opacity: .5, transform: 'translateY(3px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 120, easing: 'ease-out' }); };
       button.onkeydown = event => {
@@ -114,8 +117,9 @@ export class Settings {
     if (status.textContent !== message) status.textContent = message;
     status.hidden = !message;
   }
-  open(section = '常规') {
+  open(section = '常规', fromPointer = false) {
     if (this.dialog.open) return;
+    this.dialog.toggleAttribute('data-pointer-focus', fromPointer);
     this.contextDocument = this.host.current().activeId;
     this.origin = document.activeElement as HTMLElement | null;
     const selection = window.getSelection(); this.range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;

@@ -607,14 +607,21 @@ export class MarkdownEditor {
       const selection = transaction.selection;
       if (!selection || transaction.docChanged || transaction.startState.field(sourceField) || transaction.effects.some(effect => effect.is(sourceEffect))) return transaction;
       const decorations = transaction.startState.field(preview).decorations;
-      const ranges = selection.ranges.map(range => {
-        if (!range.empty) return range;
-        let position = range.head;
+      const bodyPosition = (position: number) => {
         for (const marker = decorations.iter(position); marker.value && marker.from <= position; marker.next()) {
           const widget = marker.value.spec.widget;
           if (widget instanceof InlineWidget && widget.kind === 'list-number' && position < marker.to) position = marker.to;
         }
-        return position === range.head ? range : EditorSelection.cursor(position);
+        return position;
+      };
+      const ranges = selection.ranges.map(range => {
+        if (range.undirectional || (!range.empty && range.from === 0 && range.to === transaction.startState.doc.length)) return range;
+        const anchor = bodyPosition(range.anchor), head = bodyPosition(range.head);
+        if (anchor === range.anchor && head === range.head) return range;
+        // A range may cross a list marker, but its endpoints must be editable.
+        return anchor === head
+          ? EditorSelection.cursor(head, 1)
+          : EditorSelection.range(anchor, head, range.goalColumn, range.bidiLevel ?? undefined, range.assoc);
       });
       if (ranges.every((range, index) => range === selection.ranges[index])) return transaction;
       return [transaction, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
