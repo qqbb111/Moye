@@ -1184,6 +1184,51 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
   } finally { await application.close(); }
 });
 
+test('有序列表正文起点的光标在点击和退格后大小及位置一致', async () => {
+  const { application, page } = await launch();
+  try {
+    for (const theme of ['light', 'workbuddy']) {
+      await execute(page, theme);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      const raw = '1. 正文';
+      const body = raw.indexOf('正文');
+      await setContent(page, raw);
+      const click = await page.evaluate(async body => {
+        await document.fonts.ready;
+        const { view } = (window as any).__editor.active();
+        const marker = view.contentDOM.querySelector('.md-list-number').getBoundingClientRect();
+        const text = view.coordsAtPos(body, 1);
+        return { y: (text.top + text.bottom) / 2, gap: (marker.right + text.left) / 2, text: text.left + 1 };
+      }, body);
+      const caret = () => page.evaluate(async () => {
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const { view } = (window as any).__editor.active();
+        const { head } = view.state.selection.main;
+        const rect = view.dom.querySelector('.cm-cursor-primary').getBoundingClientRect();
+        return { head, height: rect.height, left: rect.left };
+      });
+      await page.mouse.click(click.text, click.y);
+      const expected = await caret();
+      expect(expected.head).toBe(body);
+      expect(expected.height).toBeGreaterThan(0);
+      await page.mouse.click(click.gap, click.y);
+      expect(await caret()).toEqual(expected);
+
+      await setContent(page, '1. f正文');
+      await page.evaluate(body => {
+        const editor = (window as any).__editor.active();
+        editor.view.dispatch({ selection: { anchor: body + 1 } });
+        editor.focus();
+      }, body);
+      await page.keyboard.press('Backspace');
+      expect(await content(page)).toBe(raw);
+      expect(await caret()).toEqual(expected);
+      await page.keyboard.insertText('新');
+      expect(await content(page)).toBe('1. 新正文');
+    }
+  } finally { await application.close(); }
+});
+
 test('有序列表的隐藏编号不能成为选区，正文、跨行和源码仍可选择', async () => {
   const { application, page } = await launch();
   try {

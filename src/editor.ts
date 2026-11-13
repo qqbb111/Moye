@@ -625,23 +625,38 @@ export class MarkdownEditor {
     });
     const keepCursorInListBody = EditorState.transactionFilter.of(transaction => {
       const selection = transaction.selection;
-      if (!selection || transaction.docChanged || transaction.startState.field(sourceField) || transaction.effects.some(effect => effect.is(sourceEffect))) return transaction;
+      if (!selection || transaction.startState.field(sourceField) || transaction.effects.some(effect => effect.is(sourceEffect))) return transaction;
+      if (transaction.docChanged && !transaction.isUserEvent('delete')) return transaction;
       const decorations = transaction.startState.field(preview).decorations;
+      const beforeDelete = transaction.docChanged ? transaction.changes.invertedDesc : undefined;
       const markerBoundary = (offset: number) => {
-        let from = offset, to = offset;
+        let from = offset, to = offset, atBody = false;
         for (const marker = decorations.iter(offset); marker.value && marker.from <= to; marker.next()) {
           const widget = marker.value.spec.widget;
-          if (widget instanceof InlineWidget && widget.kind === 'list-number' && to < marker.to) {
-            from = Math.min(from, marker.from);
-            to = marker.to;
+          if (widget instanceof InlineWidget && widget.kind === 'list-number') {
+            if (marker.to === offset) atBody = true;
+            if (to < marker.to) {
+              from = Math.min(from, marker.from);
+              to = marker.to;
+            }
           }
         }
-        return { from, to };
+        return { from, to, atBody: atBody && to === offset };
       };
       const ranges = selection.ranges.map(range => {
         if (range.undirectional) return range;
+        const bodyCursor = (position: number) => EditorSelection.cursor(position, 1, range.bidiLevel ?? undefined, range.goalColumn);
+        if (beforeDelete) {
+          if (!range.empty || range.assoc >= 0) return range;
+          // Backspace normally associates its cursor with the preceding box.
+          // At the list boundary that box belongs to the number, not the text.
+          const oldPosition = beforeDelete.mapPos(range.head, -1);
+          return markerBoundary(oldPosition).atBody ? bodyCursor(range.head) : range;
+        }
         const start = markerBoundary(range.from), end = markerBoundary(range.to);
-        if (range.empty || range.to <= start.to) return start.to === range.head ? range : EditorSelection.cursor(start.to, 1);
+        if (range.empty || range.to <= start.to) {
+          return start.to !== range.head || (range.assoc < 0 && start.atBody) ? bodyCursor(start.to) : range;
+        }
         // Pointer ranges may include a whole marker together with prose.
         // Keyboard extension still stops at the editable start of the body.
         const from = transaction.isUserEvent('select.pointer') ? start.from :
