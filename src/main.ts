@@ -192,6 +192,13 @@ $('#tabbar').ondrop = event => {
   endTabDrag(); if (!valid || !workspace.documents.some(doc => doc.id === moved)) return;
   moveTab(moved, before);
 };
+$('#tabbar').addEventListener('wheel', event => {
+  const strip = $('#tabs');
+  if (event.ctrlKey || event.metaKey || !event.cancelable || draggedTab || strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? strip.clientWidth : 1;
+  event.preventDefault();
+  strip.scrollLeft += event.deltaY * unit;
+}, { passive: false });
 function renderTabs() {
   if (draggedTab || holdInlineRename($('#tabs'))) return;
   const signature = JSON.stringify([workspace.activeId, workspace.documents.map(item => [item.id, item.title, item.path, item.dirty])]);

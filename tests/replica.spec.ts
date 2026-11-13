@@ -1780,6 +1780,37 @@ test('标签可放到右侧空白和新建按钮区域，移出标签栏取消�
   } finally { await app.application.close(); }
 });
 
+test('溢出标签栏可用鼠标滚轮和横向滚动翻看，保留选中项和新建按钮', async () => {
+  const { application, page } = await launch();
+  try {
+    const native = await application.browserWindow(page);
+    await native.evaluate(window => { window.setBounds({ width: 720, height: 560 }); window.showInactive(); });
+    for (let index = 0; index < 9; index++) await execute(page, 'new');
+    await expect(page.locator('.tab')).toHaveCount(10);
+    const strip = page.locator('#tabs');
+    const add = page.getByRole('button', { name: '新建标签页' });
+    const addBox = await add.boundingBox();
+    const selected = await page.locator('.tab.active').getAttribute('data-id');
+    const position = () => strip.evaluate(element => element.scrollLeft);
+    await strip.evaluate(element => { element.scrollLeft = 0; });
+    await strip.hover();
+    await page.mouse.wheel(0, 600);
+    await expect.poll(position).toBeGreaterThan(0);
+    await expect(page.locator('.tab.active')).toHaveAttribute('data-id', selected!);
+    expect(await add.boundingBox()).toEqual(addBox);
+
+    await add.hover();
+    await page.mouse.wheel(0, -2000);
+    await expect.poll(position).toBe(0);
+    await strip.hover();
+    await page.mouse.wheel(300, 0);
+    await expect.poll(position).toBeGreaterThan(0);
+
+    await add.click();
+    await expect(page.locator('.tab')).toHaveCount(11);
+  } finally { await application.close(); }
+});
+
 test('溢出标签栏拖到右边缘会持续滚动并可放到最后', async () => {
   const { application, page } = await launch();
   try {
