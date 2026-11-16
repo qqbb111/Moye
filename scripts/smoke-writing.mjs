@@ -29,6 +29,6 @@ try {
   const file = path.join(directory, '写作验证.md'); await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); await page.evaluate(() => window.__editor.execute('save'));
   const saved = await fs.readFile(file, 'utf8'); expect(saved).not.toContain('base64'); expect(saved).not.toContain('replica-media:'); expect(saved).toContain('写作验证.assets/'); expect(saved).toContain('// 中文API：代码保持原样');
   await expect.poll(() => page.locator('.md-image img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
-  await page.evaluate(async () => { await document.fonts.ready; document.querySelector('.markdown-editor > .cm-scroller').scrollTop = 0; }); await page.mouse.move(5, 5); await page.screenshot({ path: 'docs/writing-preview.png' });
+  await page.evaluate(async () => { await document.fonts.ready; document.querySelector('.markdown-editor > .cm-scroller').scrollTop = 0; }); await page.mouse.move(5, 5); await page.screenshot({ path: path.join(directory, 'writing-preview.png') });
   expect(errors).toEqual([]); console.log(JSON.stringify({ packaged, writing: 'passed', imeEqualEvent: 'passed', tableCentered: alignment < 2, imageBytes: png.length, markdownCharacters: saved.length, errors }));
 } finally { await application.close(); }

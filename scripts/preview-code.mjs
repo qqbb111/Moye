@@ -17,7 +17,7 @@ try {
   await page.evaluate(() => window.__editor.execute('copilot')); await page.evaluate(async () => { await document.fonts.ready; });
   const block = page.locator('.md-code'); await expect(block.locator('.cm-line span').filter({ hasText: /^while$/ })).toHaveCSS('color', 'rgb(197, 134, 192)');
   await block.hover(); await expect(block.locator('.code-copy svg')).toHaveCount(1);
-  await page.screenshot({ path: 'docs/code-modern-preview.png' });
+  await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'code-modern-preview.png') });
   const original = await page.evaluate(() => window.__editor.content());
   await page.evaluate(() => window.__editor.execute('code-vscode'));
   await expect.poll(() => page.evaluate(() => window.rypota.bootstrap().then(view => view.codeTheme.source))).toBe('vscode');
@@ -33,6 +33,6 @@ try {
     expect(await fresh.evaluate(() => window.__editor.content())).toBe('');
     expect(await page.evaluate(() => window.__editor.content())).toBe(original);
   }
-  await fs.writeFile('docs/code-theme-report.json', JSON.stringify({ packaged, theme: view.codeTheme, relaunch, errors }, null, 2) + '\n');
+  await fs.writeFile(path.join(env.TYPORA_REPLICA_USER_DATA, 'code-theme-report.json'), JSON.stringify({ packaged, theme: view.codeTheme, relaunch, errors }, null, 2) + '\n');
   console.log(JSON.stringify({ packaged, source: view.codeTheme.source, theme: view.codeTheme.name, relaunch, errors }));
 } finally { await application.close(); }

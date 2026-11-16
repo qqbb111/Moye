@@ -17,6 +17,6 @@ try {
   for (const [updates, text] of [[['sh', 'shuru', '输入'], '输入'], [['w', 'wenzi', '文字'], '文字']]) { for (const text of updates) await cdp.send('Input.imeSetComposition', { text, selectionStart: text.length, selectionEnd: text.length }); await cdp.send('Input.insertText', { text }); expected += text; await expect.poll(content).toBe(expected); }
   await expect.poll(() => page.evaluate(() => window.__editor.active().view.compositionStarted)).toBe(false);
   const file = path.join(directory, '引用输入验证.md'); await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); await page.evaluate(() => window.__editor.execute('save')); expect(await fs.readFile(file, 'utf8')).toBe(expected);
-  await page.evaluate(async () => { await document.fonts.ready; }); await page.mouse.move(5, 5); await page.screenshot({ path: 'docs/quote-ime-preview.png' }); expect(errors).toEqual([]);
+  await page.evaluate(async () => { await document.fonts.ready; }); await page.mouse.move(5, 5); await page.screenshot({ path: path.join(directory, 'quote-ime-preview.png') }); expect(errors).toEqual([]);
   console.log(JSON.stringify({ packaged, shortcut: 'passed', cursorAfterMarker: 'passed', physicalIMEKeyQ: 'passed', nativeComposition: 'passed', backgroundReplaceGuard: 'passed', save: 'passed', errors }));
 } finally { await application.close(); }

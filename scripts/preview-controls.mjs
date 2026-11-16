@@ -18,8 +18,8 @@ try {
   await page.locator('.tab').filter({ hasText: '代码配色示例.md' }).click();
   await page.evaluate(() => document.fonts.ready);
   await expect(page.locator('[data-control="close"] svg')).toHaveAttribute('data-icon', 'chrome-close');
-  await page.locator('.editor-slot:not([hidden]) .md-code').hover(); await page.screenshot({ path: 'docs/controls-preview.png' });
-  await page.locator('[data-control="close"]').hover(); await page.screenshot({ path: 'docs/window-controls-preview.png', clip: { x: 1280 - 138, y: 0, width: 138, height: 32 } });
+  await page.locator('.editor-slot:not([hidden]) .md-code').hover(); await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'controls-preview.png') });
+  await page.locator('[data-control="close"]').hover(); await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'window-controls-preview.png'), clip: { x: 1280 - 138, y: 0, width: 138, height: 32 } });
   const tabs = await page.locator('.tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.id));
   const box = await page.locator('#tabs').boundingBox();
   await page.locator('.tab').first().dragTo(page.locator('#tabs'), { targetPosition: { x: box.width - 45, y: box.height / 2 } });

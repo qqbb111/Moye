@@ -23,8 +23,8 @@ try {
   await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
   const stage = page.locator('#editor-stage'); const box = await stage.boundingBox();
   await page.mouse.move(5, 5);
-  await page.screenshot({ path: 'docs/copilot-preview.png', clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 399.2) } });
-  await page.screenshot({ path: 'docs/copilot-window.png' });
+  await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'copilot-preview.png'), clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 399.2) } });
+  await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'copilot-window.png') });
   const metrics = await page.evaluate(() => {
     const find = selector => { const element = document.querySelector(selector); const style = getComputedStyle(element); const rect = element.getBoundingClientRect(); return { font: style.fontFamily, size: style.fontSize, lineHeight: style.lineHeight, color: style.color, background: style.backgroundColor, borderLeft: style.borderLeft, x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
     return { dpr: devicePixelRatio, prose: find('.markdown-editor > .cm-scroller'), heading: find('.md-h2'), quote: find('.md-quote'), code: find('.code-content .cm-scroller') };
@@ -37,7 +37,7 @@ try {
     const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
     fonts[name] = (await cdp.send('CSS.getPlatformFontsForNode', { nodeId })).fonts;
   }
-  await fs.writeFile('docs/copilot-style-report.json', JSON.stringify({ metrics, fonts, errors }, null, 2) + '\n');
+  await fs.writeFile(path.join(env.TYPORA_REPLICA_USER_DATA, 'copilot-style-report.json'), JSON.stringify({ metrics, fonts, errors }, null, 2) + '\n');
   expect(errors).toEqual([]);
   console.log(JSON.stringify({ packaged, metrics, fonts }, null, 2));
 } finally { await application.close(); }

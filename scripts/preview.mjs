@@ -12,8 +12,8 @@ try {
     const style = getComputedStyle(element); const box = element.getBoundingClientRect();
     return { class: element.className, left: box.left, width: box.width, display: style.display, marginLeft: style.marginLeft, marginRight: style.marginRight, fontFamily: style.fontFamily, flex: style.flex, background: style.backgroundColor };
   })));
-  await page.screenshot({ path: 'docs/preview.png' });
-  await page.evaluate(() => window.__editor.execute('outline')); await page.screenshot({ path: 'docs/preview-outline.png' });
-  await page.evaluate(() => window.__editor.execute('dark')); await page.screenshot({ path: 'docs/preview-dark.png' });
+  await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'preview.png') });
+  await page.evaluate(() => window.__editor.execute('outline')); await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'preview-outline.png') });
+  await page.evaluate(() => window.__editor.execute('dark')); await page.screenshot({ path: path.join(env.TYPORA_REPLICA_USER_DATA, 'preview-dark.png') });
   if (errors.length) throw new Error(errors.join('\n')); console.log('Saved light, outline and dark desktop previews.');
 } finally { await app.close(); }

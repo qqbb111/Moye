@@ -24,6 +24,6 @@ try {
   await caret('### 编辑行为校验'.length); await page.keyboard.press('Home'); await page.keyboard.press('Enter'); expect(await content()).toBe('\n' + source.replace('JIACU', '**JIACU**')); await expect(page.locator('.md-h3')).toHaveText('编辑行为校验');
   const file = path.join(directory, '编辑行为验证.md'); await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); await page.evaluate(() => window.__editor.execute('save'));
   const saved = await fs.readFile(file, 'utf8'); expect(saved).toContain('**JIACU**文字 123'); expect(saved).toMatch(/^\n### 编辑行为校验/); expect(saved).not.toContain('base64');
-  await page.evaluate(async () => { await document.fonts.ready; window.__editor.active().view.scrollDOM.scrollTop = 0; }); await page.mouse.move(5, 5); await page.screenshot({ path: 'docs/editing-preview.png' });
+  await page.evaluate(async () => { await document.fonts.ready; window.__editor.active().view.scrollDOM.scrollTop = 0; }); await page.mouse.move(5, 5); await page.screenshot({ path: path.join(directory, 'editing-preview.png') });
   expect(errors).toEqual([]); console.log(JSON.stringify({ packaged, pointerAfterImage: 'passed', boldAtWord: 'passed', adjacentChinese: 'passed', headingAtStart: 'passed', save: 'passed', errors }));
 } finally { await application.close(); }
