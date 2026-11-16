@@ -121,8 +121,24 @@ test('磁盘重命名与保存串行，保留 UTF-8 格式、草稿、最近文�
   } finally { store.dispose(); }
 });
 test('自动保存写回 UTF-8 文件并保留 BOM 和 CRLF，同时保存原文件备份', async () => {
-  const { directory, store, windowId } = await setup(); const file = path.join(directory, '中文.md'); await fs.writeFile(file, '\uFEFF# 原文\r\n\r\n正文\r\n');
-  try { const { id } = await store.openFile(windowId, file); store.update(windowId, id, '# 新标题\n\n自动保存正文\n', 1); await delay(180); assert.equal(await fs.readFile(file, 'utf8'), '\uFEFF# 新标题\r\n\r\n自动保存正文\r\n'); assert.equal(store.view(windowId).documents[0].dirty, false); assert.equal(await fs.readFile(path.join(store.directory, 'backups', `${id}.md`), 'utf8'), '\uFEFF# 原文\r\n\r\n正文\r\n'); } finally { store.dispose(); }
+  const { directory, store, windowId } = await setup();
+  const file = path.join(directory, '中文.md');
+  const original = '\uFEFF# 原文\r\n\r\n正文\r\n';
+  try {
+    await fs.writeFile(file, original);
+    const { id } = await store.openFile(windowId, file);
+    const document = store.documents.get(id)!;
+    store.update(windowId, id, '# 新标题\n\n自动保存正文\n', 1);
+    const deadline = performance.now() + 5_000;
+    while (document.savedRevision < 1 && !document.error && performance.now() < deadline) await delay(20);
+    assert.equal(document.savedRevision, 1, document.error ?? '自动保存尚未完成');
+    assert.equal(await fs.readFile(file, 'utf8'), '\uFEFF# 新标题\r\n\r\n自动保存正文\r\n');
+    assert.equal(document.dirty, false);
+    assert.equal(await fs.readFile(path.join(store.directory, 'backups', `${id}.md`), 'utf8'), original);
+  } finally {
+    store.dispose();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 test('外部修改不会被自动保存覆盖，本地草稿仍可恢复', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '冲突.md'); await fs.writeFile(file, '原文');

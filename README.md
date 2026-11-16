@@ -21,7 +21,7 @@
 
 ## 开始使用
 
-1. 在 [Releases](https://github.com/qqbb111/Moye/releases/latest) 下载 `Moye-…-windows-x64.zip`，解压整个目录，运行 `Moye.exe`。运行环境和字体已随包提供。
+1. 在 [Releases](https://github.com/qqbb111/Moye/releases/latest) 下载 `Moye-…-windows-x64.zip`，完整解压后双击目录里的 **`Moye.exe`**。运行环境和字体已随包提供。
 2. 点标签栏的「＋」新建，或按 `Ctrl+O` 打开已有的 `.md` 文件。
 3. 在「主题」切换界面和代码配色，在「文件」导出 PDF 或 HTML，在「设置 → 快捷键」修改按键。
 
@@ -48,7 +48,7 @@ npm start
 ```
 
 - `npm test` 跑单元测试，`npm run test:e2e` 跑桌面测试。
-- `npm run package` 生成本机便携版，可用项目根目录的 `启动Typora.bat` 启动。
+- `npm run package` 生成源码开发用的本机便携版。仓库根目录的 `启动Typora.bat` 是开发用快捷脚本。
 - `npm run package:zip` 生成 Windows x64 ZIP，`node scripts/smoke-release.mjs --targeted` 验证刚解压的便携包。
 
 [Windows CI](https://github.com/qqbb111/Moye/actions/workflows/windows-ci.yml) · [霞鹜文楷许可](assets/fonts/LICENSE-LXGWWenKai.txt) · [Source Code Pro 许可](assets/fonts/LICENSE-SourceCodePro.txt) · [第三方声明](THIRD_PARTY_NOTICES.txt)
