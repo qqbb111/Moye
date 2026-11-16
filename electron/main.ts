@@ -10,7 +10,7 @@ import type { ActionResult, AppCommand, SaveMode, UpdateAction, WorkspaceUpdate 
 import type { DocumentReference } from '../shared/types';
 import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
-import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY } from '../shared/branding';
+import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY, windowOpacity } from '../shared/branding';
 import { repairWindowsShortcuts } from './windows-integration';
 import { PdfPreviews } from './pdf';
 import { validatePrintOptions, printPreferences } from '../shared/print';
@@ -112,8 +112,14 @@ async function collectAndFlushWindows() {
   if (failure) throw failure.reason;
   await store.flush();
 }
+function editorWindowOpacity() {
+  const { theme, windowOpacity: percent } = store.preferences;
+  return process.platform === 'win32' && theme === 'transparent' ? windowOpacity(percent) / 100 : 1;
+}
 function createWindow(id: string = store.newWindow()) {
+  const opacity = editorWindowOpacity();
   const window = new BrowserWindow({ width: 1320, height: 880, minWidth: 640, minHeight: 420, frame: false, show: false, backgroundColor: store.preferences.theme === 'light' ? '#fbfaf7' : '#1f1f1f', title: APP_NAME, icon: appIconPath, autoHideMenuBar: true,
+    opacity: opacity < 1 ? opacity : undefined,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: process.env.TYPORA_REPLICA_TEST !== '1' } });
   windows.set(id, window);
   window.on('closed', () => deliveredRevisions.delete(id));
@@ -252,7 +258,12 @@ function registerIpc() {
   handle('document:detach', (windowId, id: string) => { requireOwned(windowId, id); const destination = store.newWindow(); store.moveDocument(windowId, id, destination); createWindow(destination); });
   handle('preferences:update', async (_windowId, preferences) => {
     const previousCodeTheme = store.preferences.codeTheme;
+    const previousOpacity = editorWindowOpacity();
     store.setPreferences(preferences);
+    const opacity = editorWindowOpacity();
+    if (opacity !== previousOpacity) {
+      for (const window of windows.values()) if (!window.isDestroyed()) window.setOpacity(opacity);
+    }
     const codeThemeChanged = previousCodeTheme !== store.preferences.codeTheme;
     if (codeThemeChanged && store.preferences.codeTheme !== 'vscode') codeTheme.stop();
     publish();

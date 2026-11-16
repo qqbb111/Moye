@@ -1,6 +1,7 @@
 import type { ShortcutOverrides } from './commands';
 import type { CodeThemePreference, CodeThemeSnapshot } from './code-theme';
 import type { PrintOptions, PrintPreferences, PdfPreviewResult, PdfFirstPage } from './print';
+import type { Theme } from './branding';
 export type SaveStatus = 'saved' | 'draft' | 'saving' | 'error' | 'conflict';
 export interface DocumentView {
   id: string;
@@ -24,7 +25,7 @@ export interface WorkspaceView {
   activeId: string | null;
   drafts: DocumentView[];
   recent: string[];
-  preferences: { autoSave: boolean; theme: 'light' | 'dark' | 'copilot' | 'workbuddy'; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: CodeThemePreference; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; shortcuts?: ShortcutOverrides; print?: PrintPreferences };
+  preferences: { autoSave: boolean; theme: Theme; windowOpacity?: number; fontSize: number; sidebar?: boolean; tabs?: boolean; codeTheme?: CodeThemePreference; formatOnSave?: boolean; codeWrap?: boolean; readingWidth?: number; sidebarWidth?: number; appearanceRevision?: number; shortcuts?: ShortcutOverrides; print?: PrintPreferences };
   codeTheme?: CodeThemeSnapshot;
   recovered: boolean;
   recoveryNotices?: string[];

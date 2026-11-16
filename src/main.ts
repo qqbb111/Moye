@@ -7,9 +7,10 @@ import './themes/copilot.css';
 import './themes/code.css';
 import './themes/controls.css';
 import './themes/workbuddy.css';
+import './themes/transparent.css';
 import { icon, type IconName } from './icons';
 import logo from '../assets/moye.svg?url';
-import { APP_NAME, APP_SHORT_NAME, THEMES } from '../shared/branding';
+import { APP_NAME, APP_SHORT_NAME, isTheme, THEMES } from '../shared/branding';
 import { markdownStatistics, toggleMarkup, applyEdits } from '../shared/markdown-tools';
 import { CODE_THEME_OPTIONS, MODERN_DARK } from '../shared/code-theme';
 import { EditorView } from '@codemirror/view';
@@ -865,7 +866,7 @@ async function execute(action: string, value?: string) {
   if (action === 'sidebar') return run(() => bridge.updatePreferences({ sidebar: !workspace.preferences.sidebar }));
   if (action === 'tabs') return run(() => bridge.updatePreferences({ tabs: workspace.preferences.tabs === false }));
   if (action === 'workbuddy') return run(() => bridge.updatePreferences({ theme: 'workbuddy', codeTheme: 'github-dark', readingWidth: 900 }));
-  if (action === 'light' || action === 'dark' || action === 'copilot') return run(() => bridge.updatePreferences({ theme: action }));
+  if (isTheme(action)) return run(() => bridge.updatePreferences({ theme: action }));
   if (action === 'code-github') return run(() => bridge.updatePreferences({ codeTheme: 'github-dark' }));
   if (action === 'code-modern' || action === 'code-vscode') return run(() => bridge.updatePreferences({ codeTheme: action === 'code-vscode' ? 'vscode' : 'modern-dark' }));
   if (action === 'code-refresh') { await run(() => bridge.refreshCodeTheme()); if (!document.querySelector('dialog[open]')) toast(workspace.preferences.codeTheme === 'vscode' ? workspace.codeTheme?.message ?? `已读取 VS Code 主题：${workspace.codeTheme?.name}` : '已重新读取 VS Code 主题；选择“代码配色：跟随 VS Code”即可应用'); return; }

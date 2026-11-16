@@ -1,7 +1,7 @@
 import { COMMANDS, commandKeys, normalizeShortcut, shortcutConflict, shortcutFromEvent, validateShortcuts, type ShortcutOverrides } from '../shared/commands';
 import type { WorkspaceView, ActionResult, UpdateAction, UpdateState } from '../shared/types';
 import { icon } from './icons';
-import { APP_NAME, THEMES } from '../shared/branding';
+import { APP_NAME, THEMES, WINDOW_OPACITY, windowOpacity } from '../shared/branding';
 import { CODE_THEME_OPTIONS } from '../shared/code-theme';
 import { version } from '../package.json';
 import './themes/settings.css';
@@ -31,6 +31,7 @@ export class Settings {
       <section id="settings-panel" role="tabpanel" tabindex="0">
         <div id="settings-general">
           <div class="setting-row"><label for="theme-select">主题</label><select id="theme-select">${THEMES.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></div>
+          <div class="setting-row" id="window-opacity-row" hidden><label for="window-opacity">窗口不透明度</label><div class="setting-control"><input id="window-opacity" type="range" min="${WINDOW_OPACITY.min}" max="${WINDOW_OPACITY.max}" step="1"><output id="window-opacity-value" for="window-opacity" aria-hidden="true"></output></div></div>
           <div class="setting-row"><label for="code-theme-select">代码配色</label><div class="setting-control"><select id="code-theme-select">${CODE_THEME_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select><button type="button" id="code-theme-refresh" aria-label="重新读取 VS Code 配色" title="重新读取 VS Code 配色" hidden>${icon('refresh')}</button></div></div><p id="code-theme-status" role="status" hidden></p>
           <div class="setting-row"><label for="font-size">正文字号</label><input id="font-size" type="number" min="14" max="24"></div>
           <div class="setting-row"><label for="reading-width-select">阅读宽度</label><select id="reading-width-select"><option value="720">紧凑 · 720</option><option value="900">适中 · 900</option><option value="1080">宽阔 · 1080</option></select></div>
@@ -76,6 +77,9 @@ export class Settings {
     this.dialog.addEventListener('close', () => { this.hideHelp(); this.recording = null; this.restoreFocus(); });
     const theme = this.get<HTMLSelectElement>('#theme-select');
     theme.onchange = () => this.persist({ theme: theme.value as Preferences['theme'] });
+    const opacity = this.get<HTMLInputElement>('#window-opacity');
+    opacity.oninput = () => this.showOpacity(opacity.valueAsNumber);
+    opacity.onchange = () => this.persist({ windowOpacity: opacity.valueAsNumber });
     const codeTheme = this.get<HTMLSelectElement>('#code-theme-select');
     codeTheme.onchange = () => { this.updateCodeTheme(); this.persist({ codeTheme: codeTheme.value as Preferences['codeTheme'] }); };
     const readingWidth = this.get<HTMLSelectElement>('#reading-width-select');
@@ -133,6 +137,10 @@ export class Settings {
     if (this.pendingWrites) return;
     const p = this.host.current().preferences; this.shortcuts = { ...p.shortcuts };
     this.get<HTMLSelectElement>('#theme-select').value = p.theme;
+    const opacity = windowOpacity(p.windowOpacity);
+    this.get('#window-opacity-row').hidden = p.theme !== 'transparent';
+    this.get<HTMLInputElement>('#window-opacity').value = String(opacity);
+    this.showOpacity(opacity);
     this.get<HTMLSelectElement>('#code-theme-select').value = p.codeTheme ?? 'github-dark';
     this.get<HTMLInputElement>('#font-size').value = String(p.fontSize);
     this.get<HTMLSelectElement>('#reading-width-select').value = String([720, 900, 1080].reduce((a, b) => Math.abs(b - (p.readingWidth ?? 900)) < Math.abs(a - (p.readingWidth ?? 900)) ? b : a));
@@ -142,9 +150,14 @@ export class Settings {
     if (!previous || !this.dialog.open || this.pendingWrites) return;
     const current = this.host.current().preferences;
     const shortcutChanged = JSON.stringify(previous.shortcuts) !== JSON.stringify(current.shortcuts);
-    if (!shortcutChanged && !(['theme', 'codeTheme', 'fontSize', 'readingWidth', 'codeWrap', 'formatOnSave', 'autoSave', 'tabs'] as const).some(key => previous[key] !== current[key])) return;
+    if (!shortcutChanged && !(['theme', 'windowOpacity', 'codeTheme', 'fontSize', 'readingWidth', 'codeWrap', 'formatOnSave', 'autoSave', 'tabs'] as const).some(key => previous[key] !== current[key])) return;
     this.syncControls();
     if (shortcutChanged && this.section === '快捷键') this.renderCommands();
+  }
+  private showOpacity(value: number) {
+    const label = `${value}%`;
+    this.get('#window-opacity-value').textContent = label;
+    this.get('#window-opacity').setAttribute('aria-valuetext', label);
   }
   updateCodeTheme() {
     const following = this.get<HTMLSelectElement>('#code-theme-select').value === 'vscode';
@@ -219,10 +232,12 @@ export class Settings {
       } catch (error) {
         this.saveError = (error as Error).message;
       } finally {
-        if (--this.pendingWrites === 0 && this.saveError) {
+        if (--this.pendingWrites === 0) {
           this.syncControls();
-          if (this.section === '快捷键') this.renderCommands();
-          this.message(this.saveError); this.saveError = '';
+          if (this.saveError) {
+            if (this.section === '快捷键') this.renderCommands();
+            this.message(this.saveError); this.saveError = '';
+          }
         }
       }
     });

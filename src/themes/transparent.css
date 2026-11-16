@@ -1,0 +1,22 @@
+:root[data-theme='transparent'] {
+  color-scheme: dark;
+  --bg: #151e1d;
+  --fg: #eff5f1;
+  --muted: #b7c7c0;
+  --surface: #1e2926;
+  --chrome: #171f1d;
+  --border: #41544d;
+  --hover: #31443d;
+  --link: #b6e2cf;
+  --code: #273831;
+  --accent-soft: #2d433a;
+  --ui-accent: #addcc8;
+  --ui-accent-soft: var(--accent-soft);
+  --selection: #7cc5aa52;
+  --highlight-tint: #d4ad74;
+}
+
+:root[data-theme='transparent'] dialog::backdrop {
+  background: #10181699;
+  backdrop-filter: none;
+}

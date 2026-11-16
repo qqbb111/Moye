@@ -7,6 +7,7 @@ import type { DocumentView, WorkspaceView, WorkspaceUpdate } from '../shared/typ
 import { tidyChineseMarkdown, applyEdits } from '../shared/markdown-tools';
 import { printPreferences } from '../shared/print';
 import { isCodeThemePreference } from '../shared/code-theme';
+import { isTheme, windowOpacity } from '../shared/branding';
 import { ImageAttachments } from './images';
 
 interface DocumentRecord extends DocumentView {
@@ -134,6 +135,8 @@ export class DocumentStore {
     delete restored.focus; delete restored.typewriter;
     this.preferences = {
       ...this.preferences, ...restored, shortcuts: restoredShortcuts(restored.shortcuts),
+      theme: isTheme(restored.theme) ? restored.theme : this.preferences.theme,
+      windowOpacity: windowOpacity(restored.windowOpacity),
       codeTheme: isCodeThemePreference(restored.codeTheme) ? restored.codeTheme : this.preferences.codeTheme,
     };
     const migrateAppearance = (snapshot.preferences?.appearanceRevision ?? 0) < 1;
@@ -340,7 +343,8 @@ export class DocumentStore {
     for (const [key, minimum, maximum] of [['readingWidth', 640, 1200], ['sidebarWidth', 200, 420]] as const) {
       const value = preferences[key]; if (typeof value === 'number' && Number.isFinite(value)) this.preferences[key] = Math.round(Math.max(minimum, Math.min(maximum, value)));
     }
-    if (preferences.theme === 'light' || preferences.theme === 'dark' || preferences.theme === 'copilot' || preferences.theme === 'workbuddy') this.preferences.theme = preferences.theme;
+    if (isTheme(preferences.theme)) this.preferences.theme = preferences.theme;
+    if (typeof preferences.windowOpacity === 'number' && Number.isFinite(preferences.windowOpacity)) this.preferences.windowOpacity = windowOpacity(preferences.windowOpacity);
     if (isCodeThemePreference(preferences.codeTheme)) this.preferences.codeTheme = preferences.codeTheme;
     if (typeof preferences.fontSize === 'number' && Number.isFinite(preferences.fontSize)) this.preferences.fontSize = Math.max(14, Math.min(24, preferences.fontSize));
     for (const key of ['sidebar', 'tabs'] as const) if (typeof preferences[key] === 'boolean') this.preferences[key] = preferences[key];

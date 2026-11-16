@@ -284,6 +284,68 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
   } finally { await application.close(); }
 });
 
+test('透明主题可从菜单启用，调节不透明度并在多窗口和重启后保留', async () => {
+  let instance = await launch();
+  const { application, page, profile, directory } = instance;
+  const checkWindowOpacity = async (app: ElectronApplication, window: Page, expected: number) => {
+    if (process.platform === 'win32') {
+      const native = await app.browserWindow(window);
+      await expect.poll(() => native.evaluate(target => target.getOpacity())).toBeCloseTo(expected, 2);
+    }
+  };
+  try {
+    const raw = '# 透明笔记\n\n正文和 ==标记==\n\n| 标题 | 内容 |\n| --- | --- |\n| 键盘 | 可编辑 |\n\n```cpp\nint n = 42;\n```\n';
+    await setContent(page, raw);
+    await page.getByRole('button', { name: '主题', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: '透明', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'transparent');
+    await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
+    await checkWindowOpacity(application, page, .74);
+    await expect(current(page).locator('.md-table')).toBeVisible();
+    await expect(current(page).locator('.md-code')).toBeVisible();
+
+    await execute(page, 'preferences');
+    const slider = page.getByRole('slider', { name: '窗口不透明度' });
+    await expect(slider).toHaveValue('74');
+    await slider.press('End');
+    await expect(slider).toHaveAttribute('aria-valuetext', '90%');
+    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.windowOpacity)).toBe(90);
+    await checkWindowOpacity(application, page, .90);
+    await page.getByRole('button', { name: '关闭设置' }).click();
+    const file = path.join(directory, '透明笔记.html');
+    await chooseSave(application, file);
+    await execute(page, 'export-html');
+    const html = await fs.readFile(file, 'utf8');
+    expect(html).toMatch(/--bg:#[0-9a-f]{6};/i);
+    expect(html).toContain('透明笔记');
+    expect(await content(page)).toBe(raw);
+
+    const secondWindow = application.waitForEvent('window');
+    await execute(page, 'new-window');
+    const second = await secondWindow;
+    await expect(second.locator('html')).toHaveAttribute('data-theme', 'transparent');
+    await checkWindowOpacity(application, second, .90);
+    await execute(second, 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await checkWindowOpacity(application, page, 1);
+    await checkWindowOpacity(application, second, 1);
+    await execute(page, 'preferences');
+    await expect(slider).toBeHidden();
+    await page.locator('#theme-select').selectOption('transparent');
+    await expect(slider).toHaveValue('90');
+    await page.getByRole('button', { name: '关闭设置' }).click();
+    await application.close();
+
+    instance = await launch(profile);
+    await expect(instance.page.locator('html')).toHaveAttribute('data-theme', 'transparent');
+    await checkWindowOpacity(instance.application, instance.page, .90);
+    await execute(instance.page, 'preferences');
+    await expect(instance.page.getByRole('slider', { name: '窗口不透明度' })).toHaveValue('90');
+  } finally {
+    if (instance.application.process().exitCode === null) await instance.application.close();
+  }
+});
+
 test('设置分类的鼠标点击和拖动不高亮文字，键盘焦点仍清晰可见', async () => {
   const { application, page } = await launch();
   try {
