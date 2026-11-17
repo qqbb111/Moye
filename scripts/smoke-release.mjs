@@ -36,17 +36,22 @@ async function launch(args = []) {
 function editor(page) {
   return page.locator('.editor-slot:not([hidden]) .markdown-editor');
 }
-async function inspectAbout(page) {
+async function inspectAbout(application, page) {
+  await application.evaluate(({ shell }) => {
+    shell.openExternal = async url => { globalThis.__smokeGuideUrl = url; };
+  });
   await page.getByRole('button', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置' });
   await settings.getByRole('tab', { name: '关于' }).click();
   await expect(settings.getByText(`版本 ${version}`, { exact: true })).toBeVisible();
-  await settings.getByRole('button', { name: '关闭设置' }).click();
+  await settings.getByRole('button', { name: 'Markdown 使用指南' }).click();
+  await expect(settings).toBeHidden();
+  await expect.poll(() => application.evaluate(() => globalThis.__smokeGuideUrl)).toBe('https://docs.github.com/zh/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax');
 }
 async function runTargetedTests() {
   const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
   const output = path.join(scratch, 'test-results');
-  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单';
+  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单|旧版用户数据迁移后恢复草稿、图片和设置';
   const code = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '--grep', grep, '--output', output], {
       cwd: root, env: { ...process.env, TYPORA_REPLICA_TEST_EXE: executablePath }, stdio: 'inherit', windowsHide: true,
@@ -80,7 +85,7 @@ try {
   await editor(page).locator('.cm-content').evaluate(element => document.fonts.load('16px "Moye WenKai"', element.textContent).then(fonts => {
     if (!fonts.some(font => font.family.replaceAll('"', '') === 'Moye WenKai' && font.status === 'loaded')) throw new Error('Bundled WenKai did not load');
   }));
-  await inspectAbout(page);
+  await inspectAbout(application, page);
 
   await editor(page).locator('.cm-content').first().focus();
   await page.keyboard.press('Control+End');

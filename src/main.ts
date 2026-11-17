@@ -874,7 +874,7 @@ async function execute(action: string, value?: string) {
   if (action === 'auto-save') return run(() => bridge.updatePreferences({ autoSave: !workspace.preferences.autoSave }));
   if (action === 'fullscreen') { bridge.fullscreen(); return; } if (action === 'preferences') { preferences(); return; }
   if (action === 'quick-open') { quickOpen(); return; } if (action === 'about' || action === 'shortcuts') { settings.open(action === 'about' ? '关于' : '快捷键'); return; }
-  if (action === 'guide') return run(() => bridge.openExternal('https://support.typora.io/Markdown-Reference/'));
+  if (action === 'guide') return run(() => bridge.openExternal('https://docs.github.com/zh/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax'));
   if (action === 'toggle-source') { editor?.setSource(!editor.source); render(); return; }
   if (action === 'code-wrap') return run(() => bridge.updatePreferences({ codeWrap: !workspace.preferences.codeWrap }));
   if (action === 'select-line') { const focused = document.activeElement?.closest('.cm-content'); const view = focused ? EditorView.findFromDOM(focused as HTMLElement) : editor?.view; if (view) selectLine(view); return; }

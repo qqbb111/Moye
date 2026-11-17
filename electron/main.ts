@@ -10,17 +10,24 @@ import type { ActionResult, AppCommand, SaveMode, UpdateAction, WorkspaceUpdate 
 import type { DocumentReference } from '../shared/types';
 import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
-import { APP_ID, APP_NAME, LEGACY_DATA_DIRECTORY, windowOpacity } from '../shared/branding';
+import { APP_ID, APP_NAME, windowOpacity } from '../shared/branding';
 import { repairWindowsShortcuts } from './windows-integration';
 import { PdfPreviews } from './pdf';
 import { validatePrintOptions, printPreferences } from '../shared/print';
 import { PortableUpdates } from './portable-updates';
+import { migrateUserData, profilePaths } from './user-data';
 
 app.setName(APP_NAME);
 const appId = APP_ID;
 if (process.platform === 'win32') app.setAppUserModelId(appId);
-// A product rename must not move recovery data or split the single-instance lock.
-app.setPath('userData', process.env.TYPORA_REPLICA_USER_DATA ? path.resolve(process.env.TYPORA_REPLICA_USER_DATA) : path.join(app.getPath('appData'), LEGACY_DATA_DIRECTORY));
+const testAppData = process.env.TYPORA_REPLICA_TEST === '1' ? process.env.TYPORA_REPLICA_TEST_APP_DATA : undefined;
+const profile = profilePaths(testAppData ? path.resolve(testAppData) : app.getPath('appData'), process.env.TYPORA_REPLICA_USER_DATA);
+app.setPath('userData', profile.lock);
+const primaryInstance = app.requestSingleInstanceLock();
+if (primaryInstance) {
+  app.setPath('userData', profile.userData);
+  app.setPath('sessionData', profile.userData);
+}
 const appIconPath = app.isPackaged ? path.join(path.dirname(process.execPath), 'moye.ico') : path.resolve(__dirname, '../assets/replica.ico');
 protocol.registerSchemesAsPrivileged([
   { scheme: 'replica', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -35,7 +42,7 @@ const pendingClose = new Map<string, { sender: number; finish: (prepared: boolea
 const folders = new Map<string, string>();
 const folderNavigation = new Map<string, symbol>();
 const fileWatchers = new Map<string, { file: string; watcher: FSWatcher; timer?: ReturnType<typeof setTimeout> }>();
-const store = new DocumentStore(path.join(app.getPath('userData'), 'recovery'));
+const store = new DocumentStore(profile.recovery);
 const devUrl = process.env.TYPORA_REPLICA_DEV_URL;
 const assetRoot = path.resolve(__dirname, '../dist');
 let quitting = false;
@@ -423,15 +430,17 @@ function handleLaunch(argv: string[], cwd: string) {
   if (!files.length || argv.includes('--new-window') || !target) newBlankWindow();
   if (files.length) { const destination = argv.includes('--new-window') || !target ? [...windows.keys()].at(-1)! : target; for (const file of files) void openFile(destination, path.resolve(cwd, file)).catch(error => notify(windows.get(destination)!, error.message)); }
 }
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!primaryInstance) app.quit();
 else {
   app.on('second-instance', (_event, argv, cwd) => handleLaunch(argv, cwd));
   void app.whenReady().then(async () => {
+    const migration = await migrateUserData(profile);
+    if (migration?.notice) store.recoveryNotices.push(migration.notice);
     if (process.platform === 'win32' && app.isPackaged && !process.env.TYPORA_REPLICA_USER_DATA && process.env.TYPORA_REPLICA_TEST !== '1') {
       void repairWindowsShortcuts(shell, process.execPath, app.getPath('appData'), appIconPath).catch(error => console.error('Shortcut repair:', error));
       app.setUserTasks([{ program: process.execPath, arguments: '--new-window', iconPath: appIconPath, iconIndex: 0, title: '新建窗口', description: '新建一个墨页窗口' }]);
     }
-    await store.initialize(); await updates.takeResult(); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
+    await store.initialize(); await updates.takeResult(migration?.migratedFrom); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
     await registerProtocols(); registerIpc(); installMenu();
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);

@@ -37,7 +37,7 @@ test.afterEach(async () => {
 
 async function launch(profile?: string, extraEnv: NodeJS.ProcessEnv = {}) {
   const directory = await testDirectory(); profile ??= path.join(directory, 'profile');
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv, TYPORA_REPLICA_USER_DATA: profile, TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+  const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_USER_DATA: profile, ...extraEnv, TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
   const executablePath = process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string;
   const application = await electron.launch({ executablePath, args: process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.'], cwd: root, env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) });
   applications.add(application);
@@ -56,6 +56,12 @@ async function toolbarAction(page: Page, section: string, action: string) {
   await page.getByRole('menu', { name: section, exact: true }).getByRole('menuitem', { name: new RegExp(`^${action}( |$)`) }).click();
 }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
+async function requestUpdateQuit(profile: string) {
+  const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_TEST: '1', TYPORA_REPLICA_USER_DATA: profile };
+  delete env.ELECTRON_RUN_AS_NODE;
+  await promisify(execFile)(process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string,
+    [...(process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.']), '--quit-for-update'], { cwd: root, env, timeout: 15000 });
+}
 
 test('文件菜单、目录进退、资源管理器、另存为和原位重命名贯通桌面入口', async ({}, testInfo) => {
   const { application, page, directory } = await launch();
@@ -529,8 +535,7 @@ test('更新退出参数走正常保存流程，多窗口草稿在再次启动�
     const secondPromise = first.application.waitForEvent('window'); await execute(first.page, 'new-window'); const second = await secondPromise;
     await second.locator('.markdown-editor').waitFor(); await setContent(second, '第二个窗口尚未保存的内容');
     const nativeProcess = first.application.process();
-    const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_TEST: '1', TYPORA_REPLICA_USER_DATA: first.profile }; delete env.ELECTRON_RUN_AS_NODE;
-    await promisify(execFile)(process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string, [...(process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.']), '--quit-for-update'], { cwd: root, env });
+    await requestUpdateQuit(first.profile);
     await expect.poll(() => nativeProcess.exitCode, { timeout: 20000 }).toBe(0);
     restored = await launch(first.profile);
     await expect.poll(async () => Promise.all(restored!.application.windows().map(page => content(page)))).toEqual(expect.arrayContaining(['更新之前第一份草稿', '第二个窗口尚未保存的内容']));
@@ -1975,6 +1980,65 @@ test('中文输入法 Process 等号键可切换正文和表格高亮，拼音�
     await setContent(page, '```cpp\nint value = 1;\n```'); await current(page).locator('.code-content .cm-content').click(); await page.keyboard.press('Control+a');
     expect(await pressIMEEqual()).toBe(false); expect(await content(page)).toBe('```cpp\nint value = 1;\n```');
   } finally { await application.close(); }
+});
+
+test('旧版用户数据迁移后恢复草稿、图片和设置', async () => {
+  const appData = await testDirectory();
+  const legacy = path.join(appData, 'Typora Replica');
+  const target = path.join(appData, 'Moye');
+  const png = await fs.readFile(path.join(root, 'assets/replica.png'));
+  const old = await launch(legacy);
+  const media = await old.application.evaluate((_electron, bytes) =>
+    (globalThis as any).__replicaTest.store.images.put(Buffer.from(bytes), '旧草稿图片.png') as Promise<string>, [...png]);
+  const source = `# 未保存的笔记\n\n![保留的图片](${media})`;
+  await setContent(old.page, source);
+  await old.page.evaluate(() => window.rypota.updatePreferences({ theme: 'dark', fontSize: 20, autoSave: false }));
+  await old.application.close();
+
+  const backup = path.join('recovery', 'workspace.json.bak');
+  const snapshot = path.join('recovery', 'workspace.json');
+  const attachment = path.join('recovery', 'assets', path.posix.basename(media));
+  const oldSnapshot = await fs.readFile(path.join(legacy, snapshot));
+  const oldBackup = await fs.readFile(path.join(legacy, backup));
+  const inspectRecovery = async (profile: string) => {
+    const recovery = path.join(profile, 'recovery');
+    const files = (await fs.readdir(recovery, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile());
+    return Object.fromEntries(await Promise.all(files.map(async entry => {
+      const file = path.join(entry.parentPath, entry.name);
+      return [path.relative(recovery, file), await fs.readFile(file)];
+    })));
+  };
+  const originalRecovery = await inspectRecovery(legacy);
+  await fs.writeFile(path.join(legacy, 'portable-update-result'), 'installed');
+  await fs.writeFile(path.join(legacy, 'unrelated-cache'), '不属于恢复数据');
+
+  const environment = { TYPORA_REPLICA_USER_DATA: undefined, TYPORA_REPLICA_TEST_APP_DATA: appData };
+  const migrated = await launch(undefined, environment);
+  expect(await migrated.application.evaluate(({ app }) => [app.getPath('userData'), app.getPath('sessionData')])).toEqual([target, target]);
+  await expect.poll(() => content(migrated.page)).toBe(source);
+  await expect.poll(() => current(migrated.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  const preferences = await migrated.page.evaluate(async () => (await window.rypota.bootstrap()).preferences);
+  expect(preferences).toMatchObject({ theme: 'dark', fontSize: 20, autoSave: false });
+  const update = await migrated.page.evaluate(() => window.rypota.portableUpdate('status'));
+  expect(update).toMatchObject({ phase: 'current', message: expect.stringContaining('已更新到') });
+  expect(await fs.readFile(path.join(target, snapshot))).toEqual(oldSnapshot);
+  expect(await fs.readFile(path.join(target, backup))).toEqual(oldBackup);
+  expect(await fs.readFile(path.join(target, attachment))).toEqual(png);
+  await expect(fs.stat(path.join(target, 'unrelated-cache'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await setContent(migrated.page, `${source}\n\n迁移后继续写。`);
+  await migrated.application.close();
+
+  const reopened = await launch(undefined, environment);
+  await expect.poll(() => content(reopened.page)).toContain('迁移后继续写。');
+  await setContent(reopened.page, '关闭前写入的新内容');
+  const nativeProcess = reopened.application.process();
+  await requestUpdateQuit(legacy);
+  await expect.poll(() => nativeProcess.exitCode, { timeout: 20000 }).toBe(0);
+
+  const afterUpdateQuit = await launch(undefined, environment);
+  await expect.poll(() => content(afterUpdateQuit.page)).toBe('关闭前写入的新内容');
+  expect(await inspectRecovery(legacy)).toEqual(originalRecovery);
+  await afterUpdateQuit.application.close();
 });
 
 test('中文整理快捷键可局部操作和单步撤销，保存整理为可选并同步编辑区', async () => {

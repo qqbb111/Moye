@@ -32,7 +32,7 @@
 
 保存过的 Markdown 放在你选的文件夹。相对图片从文档目录及其子目录加载，其他图片可通过「插入图片」复制为附件。PDF 中无法加载的图片会显示占位，正文照常导出。
 
-草稿、打开的标签和偏好记录在 `%APPDATA%\Typora Replica\recovery\workspace.json`，上一份有效记录为同目录的 `workspace.json.bak`。未随文档保存的图片附件位于 `recovery\assets`。重装或迁移电脑前，可备份整个 `recovery` 目录。
+草稿、打开的标签和偏好记录在 `%APPDATA%\Moye\recovery\workspace.json`，上一份有效记录为同目录的 `workspace.json.bak`。未随文档保存的图片附件位于 `recovery\assets`。从使用 `%APPDATA%\Typora Replica\recovery` 的旧版升级时，墨页会在首次启动时复制恢复数据，保留旧目录。如果新旧目录已经各有一份数据，墨页会打开当前数据并提示旧数据的位置。
 
 </details>
 
@@ -48,7 +48,7 @@ npm start
 ```
 
 - `npm test` 跑单元测试，`npm run test:e2e` 跑桌面测试。
-- `npm run package` 生成源码开发用的本机便携版。仓库根目录的 `启动Typora.bat` 是开发用快捷脚本。
+- `npm run package` 生成源码开发用的本机便携版。仓库根目录的 `启动墨页.bat` 是开发用快捷脚本。
 - `npm run package:zip` 生成 Windows x64 ZIP，`node scripts/smoke-release.mjs --targeted` 验证刚解压的便携包。
 
 [Windows CI](https://github.com/qqbb111/Moye/actions/workflows/windows-ci.yml) · [霞鹜文楷许可](assets/fonts/LICENSE-LXGWWenKai.txt) · [Source Code Pro 许可](assets/fonts/LICENSE-SourceCodePro.txt) · [第三方声明](THIRD_PARTY_NOTICES.txt)

@@ -180,9 +180,13 @@ export class PortableUpdates {
     throw new Error('更新进程未就绪。');
   }
 
-  async takeResult() {
-    const result = path.join(this.options.userData, 'portable-update-result');
-    const outcome = await fs.readFile(result, 'utf8').catch(() => '');
+  async takeResult(previousUserData?: string) {
+    let result = path.join(this.options.userData, 'portable-update-result');
+    let outcome = await fs.readFile(result, 'utf8').catch(() => '');
+    if (!outcome && previousUserData) {
+      result = path.join(previousUserData, 'portable-update-result');
+      outcome = await fs.readFile(result, 'utf8').catch(() => '');
+    }
     if (!outcome) return;
     await fs.unlink(result).catch(() => {});
     if (outcome === 'installed') this.set({ phase: 'current', message: `已更新到 ${this.options.version}。` });
