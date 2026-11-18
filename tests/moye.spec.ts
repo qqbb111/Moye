@@ -1371,6 +1371,41 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
   } finally { await application.close(); }
 });
 
+test('列表中输入单个连字符保留正文，多行下划线标题不隐藏正文', async ({}, testInfo) => {
+  const { application, page } = await launch();
+  const raw = '# 数据库扩容\n\n- 读写分离\n读请求走从库。\n- 分库分表\n按分片键分配数据。\n**代价：** 跨片查询需要聚合。\n  ';
+  try {
+    const editor = current(page).locator('.markdown-editor');
+    const lines = editor.locator('.cm-line');
+    const body = lines.filter({ hasText: '跨片查询需要聚合。' });
+    await setContent(page, raw);
+    await editor.locator('.cm-content').focus();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('-');
+    expect(await content(page)).toBe(`${raw}-`);
+    await expect(body).toBeVisible();
+    await expect(editor.locator('.md-h2')).toHaveCount(0);
+    await expect(lines.last()).toHaveText(/^\s*-$/);
+
+    const native = await application.browserWindow(page);
+    await native.evaluate(window => { window.setBounds({ width: 1000, height: 700 }); window.showInactive(); });
+    await page.evaluate(() => document.fonts.ready);
+    await page.screenshot({ path: testInfo.outputPath('setext-preview.png') });
+
+    await page.keyboard.insertText(' 下一项');
+    expect(await content(page)).toBe(`${raw}- 下一项`);
+    await expect(editor.locator('.md-list').last()).toContainText('下一项');
+    await expect(body).toBeVisible();
+
+    const heading = '> 第一行标题\n> **第二行标题**\n> ---\n\n接下来的正文。';
+    await setContent(page, heading);
+    await page.keyboard.press('Control+End');
+    await expect(editor.locator('.md-h2')).toHaveText(['第一行标题', '第二行标题']);
+    await expect(lines.filter({ hasText: '接下来的正文。' })).toBeVisible();
+    expect(await content(page)).toBe(heading);
+  } finally { await application.close(); }
+});
+
 test('有序列表正文起点的光标在点击和退格后大小及位置一致', async () => {
   const { application, page } = await launch();
   try {

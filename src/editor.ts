@@ -408,15 +408,30 @@ function previewDecorations(state: EditorState, ast: MarkdownNode, host: Host): 
     if (node.type === 'paragraph' && /^\[toc\]$/i.test(raw.trim()) && block(node, 'toc')) return;
     if (node.type === 'image' && parent?.type === 'paragraph' && parent.children?.length === 1) { block(node, 'image', true); return; }
     if (node.type === 'heading') {
-      line(from, `md-heading md-h${node.depth}`);
       const row = state.doc.lineAt(from);
-      const showMarkers = parent?.type === 'listItem' && state.doc.lineAt(startOf(parent)).number === row.number && active(row.from, row.to);
       const prefix = /^#{1,6}(?:[ \t]+|$)/.exec(raw);
-      const suffix = /[ \t]+#+[ \t]*$/.exec(raw);
-      const headingMarker = (start: number, end: number) => showMarkers ? mark(start, end, 'md-heading-marker') : hide(start, end);
-      if (prefix) headingMarker(from, from + prefix[0].length);
-      if (suffix && suffix.index >= (prefix?.[0].length ?? 0)) headingMarker(to - suffix[0].length, to);
-      if (!prefix) { const newline = raw.indexOf('\n'); if (newline >= 0) hide(from + newline, to); }
+      const cls = `md-heading md-h${node.depth}`;
+      if (prefix) {
+        line(from, cls);
+        const showMarkers = parent?.type === 'listItem' && state.doc.lineAt(startOf(parent)).number === row.number && active(row.from, row.to);
+        const headingMarker = (start: number, end: number) => showMarkers ? mark(start, end, 'md-heading-marker') : hide(start, end);
+        headingMarker(from, from + prefix[0].length);
+        const suffix = /[ \t]+#+[ \t]*$/.exec(raw);
+        if (suffix && suffix.index >= prefix[0].length) headingMarker(to - suffix[0].length, to);
+      } else {
+        const underline = state.doc.lineAt(to);
+        const editingUnderline = active(underline.from, underline.to);
+        // A lone dash can still become a list item while the user edits this line.
+        if (!(editingUnderline && /(?:^|[> \t])-[ \t]*$/.test(underline.text))) {
+          const last = underline.number - 1;
+          for (let number = row.number; number <= last; number++) {
+            const continuation = number > row.number ? ' md-heading-continuation' : '';
+            const continued = number < last ? ' md-heading-continued' : '';
+            line(state.doc.line(number).from, cls + continuation + continued);
+          }
+          if (!editingUnderline) hide(state.doc.line(last).to, to);
+        }
+      }
     }
     if (node.type === 'blockquote') {
       for (let number = state.doc.lineAt(from).number; number <= state.doc.lineAt(to).number; number++) { const row = state.doc.line(number); line(row.from, 'md-quote'); const marker = /^(\s*>\s?)+/.exec(row.text); if (marker) { if (active(row.from, row.to)) mark(row.from, row.from + marker[0].length, 'md-quote-marker'); else hide(row.from, row.from + marker[0].length); } }

@@ -51,7 +51,7 @@ async function inspectAbout(application, page) {
 async function runTargetedTests() {
   const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
   const output = path.join(scratch, 'test-results');
-  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单|旧版用户数据迁移后恢复草稿、图片和设置|文件树、相对图片、HTML 和 PDF 导出|任务栏|Windows 快捷方式';
+  const grep = '原位重命名|设置分类的鼠标|有序列表|列表中输入单个连字符|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单|旧版用户数据迁移后恢复草稿、图片和设置|文件树、相对图片、HTML 和 PDF 导出|任务栏|Windows 快捷方式';
   const code = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '--grep', grep, '--output', output], {
       cwd: root, env: { ...process.env, MOYE_TEST_EXE: executablePath }, stdio: 'inherit', windowsHide: true,

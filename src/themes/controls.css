@@ -109,6 +109,8 @@ details > summary:hover { background: var(--hover); }
 :root[data-theme] .markdown-editor > .cm-scroller > .cm-content > .cm-line:has(> br:only-child) { line-height: 1em !important; min-height: 1em; }
 :root[data-theme] .md-heading { border: 0; line-height: 1.4 !important; font-weight: 700; }
 :root[data-theme] .md-heading span { font-weight: inherit !important; }
+:root[data-theme] .md-heading.md-heading-continuation { padding-top: 0 !important; }
+:root[data-theme] .md-heading.md-heading-continued { padding-bottom: 0 !important; }
 :root[data-theme] .md-h1 { font-size: 1.95em; padding-top: .25em !important; padding-bottom: .45em !important; letter-spacing: .01em; }
 :root[data-theme] .md-h2 { font-size: 1.5em; padding-top: .6em !important; padding-bottom: .35em !important; }
 :root[data-theme] .md-h3 { font-size: 1.2em; padding-top: .55em !important; padding-bottom: .2em !important; }
