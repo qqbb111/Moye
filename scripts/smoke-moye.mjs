@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const directory = path.resolve('.test-data', `release-${randomUUID()}`); await fs.mkdir(directory, { recursive: true });
-const executablePath = path.resolve(process.env.TYPORA_REPLICA_PREVIEW_EXE ?? 'release/Typora Replica-win32-x64/Typora Replica.exe');
-const env = { ...process.env, TYPORA_REPLICA_USER_DATA: path.join(directory, 'profile'), TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+const executablePath = path.resolve(process.env.MOYE_PREVIEW_EXE ?? 'release/Moye-win32-x64/Moye.exe');
+const env = { ...process.env, MOYE_USER_DATA: path.join(directory, 'profile'), MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
 const application = await electron.launch({ executablePath, args: [path.resolve('docs/示例.md')], env });
 const page = await application.firstWindow(); const errors = []; page.on('pageerror', error => errors.push(error.message));
 try {

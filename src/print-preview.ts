@@ -30,7 +30,7 @@ export class PrintPreview {
       <div class="print-body"><aside class="print-settings"><label>纸张与版式<select id="print-layout"><option value="portrait">A4 纵向 · 单栏</option><option value="landscape-two-column">A4 横向 · 双栏</option></select></label><label>代码配色<select id="print-color"><option value="mono">黑白省墨</option><option value="light">浅色语法高亮</option></select></label><label>代码字号 <span class="print-unit">pt</span><input id="print-font" type="number" min="8" max="12" step="0.5"></label><label class="print-checkbox"><input id="print-lines" type="checkbox">显示代码行号</label><div id="print-stale" hidden>原文已更新<button id="print-refresh">刷新预览</button></div><button id="print-save" disabled>保存 PDF…</button><p id="print-status" role="alert" hidden></p></aside>
       <section class="print-preview-area"><div class="print-toolbar"><div class="print-page-info"><span id="print-page-count"></span><span id="print-busy" aria-label="正在排版" role="status" hidden></span></div><label>缩放<select id="print-zoom" aria-label="预览缩放"><option value="fit">适合宽度</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option></select></label></div><div id="print-pages" tabindex="0" aria-label="PDF 页面预览"></div></section></div>`;
     document.body.append(this.dialog);
-    window.rypota.onPdfFirstPage(page => {
+    window.moye.onPdfFirstPage(page => {
       const request = this.request;
       if (!request || request.final || page.requestId !== request.id || page.documentId !== request.documentId || request.generation !== this.generation || !this.dialog.open) return;
       void this.displayPdf(page.bytes, request.generation).then(visible => {
@@ -68,7 +68,7 @@ export class PrintPreview {
     if (this.request) {
       this.request.abort.abort();
       this.request = undefined;
-      void window.rypota.releasePdf();
+      void window.moye.releasePdf();
     }
     this.clearPdf();
     this.get('#print-page-count').textContent = '';
@@ -95,7 +95,7 @@ export class PrintPreview {
         const prefix = printPrefix(snapshot.content);
         if (prefix?.trim()) {
           void printHTML(prefix, snapshot.title, host, options, signal, true).then(first => {
-            if (!signal.aborted && !request.final) void window.rypota.previewPdfFirstPage(snapshot.id, first, options, request.id).catch(() => {});
+            if (!signal.aborted && !request.final) void window.moye.previewPdfFirstPage(snapshot.id, first, options, request.id).catch(() => {});
           }).catch(() => {});
           // Give the lightweight prefix a turn before parsing the whole document.
           if (options.color === 'mono') await new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -104,7 +104,7 @@ export class PrintPreview {
         if (source === this.preparedSource && html.length <= 2 * 1024 * 1024) { this.prepared.set(key, html); if (this.prepared.size > 4) this.prepared.delete(this.prepared.keys().next().value!); }
       }
       if (generation !== this.generation || !this.dialog.open) return;
-      const result = await window.rypota.previewPdf(snapshot.id, html, options, request.id);
+      const result = await window.moye.previewPdf(snapshot.id, html, options, request.id);
       if (generation !== this.generation || !this.dialog.open) return;
       request.final = true;
       if (!result.ok) { if (!result.canceled) throw new Error(result.message ?? '无法生成 PDF'); return; }
@@ -124,7 +124,7 @@ export class PrintPreview {
     this.pdf = pdf; return await this.paintPages() && generation === this.generation && this.dialog.open;
   }
   private finishBusy() { this.get('#print-busy').hidden = true; this.get('#print-save').textContent = '保存 PDF…'; }
-  private dispose() { this.generation++; clearTimeout(this.timer); this.request?.abort.abort(); this.clearPdf(); this.worker?.destroy(); this.worker = undefined; this.request = undefined; this.id = ''; delete this.dialog.dataset.previewId; void window.rypota.releasePdf(); }
+  private dispose() { this.generation++; clearTimeout(this.timer); this.request?.abort.abort(); this.clearPdf(); this.worker?.destroy(); this.worker = undefined; this.request = undefined; this.id = ''; delete this.dialog.dataset.previewId; void window.moye.releasePdf(); }
   private clearPdf(preservePages = false) {
     this.paintGeneration++;
     this.observer?.disconnect(); for (const task of this.renders.values()) task.cancel(); this.renders.clear();
@@ -225,7 +225,7 @@ export class PrintPreview {
   private async save() {
     if (!this.id || this.get<HTMLButtonElement>('#print-save').disabled) return;
     this.get<HTMLButtonElement>('#print-save').disabled = true;
-    try { const result = await window.rypota.savePdf(this.id, { ...this.preferences.fonts }); if (result.ok) this.dialog.close(); else { this.get<HTMLButtonElement>('#print-save').disabled = false; if (!result.canceled) this.message(result.message ?? '无法保存 PDF'); } }
+    try { const result = await window.moye.savePdf(this.id, { ...this.preferences.fonts }); if (result.ok) this.dialog.close(); else { this.get<HTMLButtonElement>('#print-save').disabled = false; if (!result.canceled) this.message(result.message ?? '无法保存 PDF'); } }
     catch (error) { this.message((error as Error).message); this.get<HTMLButtonElement>('#print-save').disabled = false; }
   }
 }

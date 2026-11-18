@@ -11,7 +11,7 @@ import type { DocumentReference } from '../shared/types';
 import { BUILTIN_CODE_THEMES } from '../shared/code-theme';
 import { VscodeThemeSync } from './vscode-theme';
 import { APP_ID, APP_NAME, windowOpacity } from '../shared/branding';
-import { repairWindowsShortcuts } from './windows-integration';
+import { repairWindowsIntegration, repairWindowsShortcuts } from './windows-integration';
 import { PdfPreviews } from './pdf';
 import { validatePrintOptions, printPreferences } from '../shared/print';
 import { PortableUpdates } from './portable-updates';
@@ -20,18 +20,18 @@ import { migrateUserData, profilePaths } from './user-data';
 app.setName(APP_NAME);
 const appId = APP_ID;
 if (process.platform === 'win32') app.setAppUserModelId(appId);
-const testAppData = process.env.TYPORA_REPLICA_TEST === '1' ? process.env.TYPORA_REPLICA_TEST_APP_DATA : undefined;
-const profile = profilePaths(testAppData ? path.resolve(testAppData) : app.getPath('appData'), process.env.TYPORA_REPLICA_USER_DATA);
+const testAppData = process.env.MOYE_TEST === '1' ? process.env.MOYE_TEST_APP_DATA : undefined;
+const profile = profilePaths(testAppData ? path.resolve(testAppData) : app.getPath('appData'), process.env.MOYE_USER_DATA);
 app.setPath('userData', profile.lock);
 const primaryInstance = app.requestSingleInstanceLock();
 if (primaryInstance) {
   app.setPath('userData', profile.userData);
   app.setPath('sessionData', profile.userData);
 }
-const appIconPath = app.isPackaged ? path.join(path.dirname(process.execPath), 'moye.ico') : path.resolve(__dirname, '../assets/replica.ico');
+const appIconPath = app.isPackaged ? path.join(path.dirname(process.execPath), 'moye.ico') : path.resolve(__dirname, '../assets/moye.ico');
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'replica', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
-  { scheme: 'replica-media', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: 'moye', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'moye-media', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 const windows = new Map<string, BrowserWindow>();
 const deliveredRevisions = new Map<string, Map<string, number>>();
@@ -43,7 +43,7 @@ const folders = new Map<string, string>();
 const folderNavigation = new Map<string, symbol>();
 const fileWatchers = new Map<string, { file: string; watcher: FSWatcher; timer?: ReturnType<typeof setTimeout> }>();
 const store = new DocumentStore(profile.recovery);
-const devUrl = process.env.TYPORA_REPLICA_DEV_URL;
+const devUrl = process.env.MOYE_DEV_URL;
 const assetRoot = path.resolve(__dirname, '../dist');
 let quitting = false;
 let quitInProgress = false;
@@ -90,7 +90,7 @@ function windowIdOf(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) 
   const window = BrowserWindow.fromWebContents(event.sender);
   const entry = [...windows.entries()].find(([, value]) => value === window);
   const url = event.senderFrame?.url ?? '';
-  if (!entry || event.senderFrame !== event.sender.mainFrame || !(url.startsWith('replica://app/') || (devUrl && new URL(url).origin === new URL(devUrl).origin))) throw new Error('请求来源不正确');
+  if (!entry || event.senderFrame !== event.sender.mainFrame || !(url.startsWith('moye://app/') || (devUrl && new URL(url).origin === new URL(devUrl).origin))) throw new Error('请求来源不正确');
   return entry[0];
 }
 function requireOwned(windowId: string, id: string) { if (typeof id !== 'string' || store.owner(id) !== windowId) throw new Error('找不到当前窗口中的文档'); }
@@ -127,7 +127,7 @@ function createWindow(id: string = store.newWindow()) {
   const opacity = editorWindowOpacity();
   const window = new BrowserWindow({ width: 1320, height: 880, minWidth: 640, minHeight: 420, frame: false, show: false, backgroundColor: store.preferences.theme === 'light' ? '#fbfaf7' : '#1f1f1f', title: APP_NAME, icon: appIconPath, autoHideMenuBar: true,
     opacity: opacity < 1 ? opacity : undefined,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: process.env.TYPORA_REPLICA_TEST !== '1' } });
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false, backgroundThrottling: process.env.MOYE_TEST !== '1' } });
   windows.set(id, window);
   window.on('closed', () => deliveredRevisions.delete(id));
   window.webContents.on('did-start-loading', () => deliveredRevisions.delete(id));
@@ -136,7 +136,7 @@ function createWindow(id: string = store.newWindow()) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
-  window.on('ready-to-show', () => { if (process.env.TYPORA_REPLICA_TEST !== '1') window.show(); });
+  window.on('ready-to-show', () => { if (process.env.MOYE_TEST !== '1') window.show(); });
   window.on('focus', () => { for (const documentId of store.windows.get(id)?.documentIds ?? []) void store.refreshFromDisk(documentId).catch(() => {}); });
   window.on('close', event => {
     if (allowedClose.has(window.id) || quitting) return;
@@ -158,7 +158,7 @@ function createWindow(id: string = store.newWindow()) {
   window.on('closed', () => { pdfPreviews.dispose(id); windows.delete(id); folders.delete(id); folderNavigation.delete(id); allowedClose.delete(window.id); closing.delete(window.id); });
   window.webContents.on('render-process-gone', (_event, details) => { console.error('Renderer stopped:', details.reason); void store.persist().catch(() => {}); });
   if (devUrl) void window.loadURL(devUrl);
-  else void window.loadURL('replica://app/index.html');
+  else void window.loadURL('moye://app/index.html');
   return window;
 }
 async function openFile(windowId: string, file: string) {
@@ -365,7 +365,7 @@ function registerIpc() {
     requireOwned(id, docId); if (typeof html !== 'string' || html.length > 30 * 1024 * 1024) throw new Error('无法导出此文档');
     const doc = store.documents.get(docId)!; const result = await dialog.showSaveDialog(windows.get(id)!, { title: '导出 HTML', defaultPath: (doc.path ?? doc.title).replace(/\.(md|markdown|mdown|mkd|txt)$/i, '') + '.html', filters: [{ name: 'HTML', extensions: ['html'] }] });
     if (result.canceled || !result.filePath) throw new Error('canceled');
-    for (const match of [...html.matchAll(/src="(replica-media:[^"]+)"/g)]) {
+    for (const match of [...html.matchAll(/src="(moye-media:[^"]+)"/g)]) {
       const response = await net.fetch(match[1].replaceAll('&amp;', '&')); if (!response.ok) continue;
       const bytes = Buffer.from(await response.arrayBuffer()); const mime = response.headers.get('content-type') ?? 'image/png';
       html = html.replace(match[1], `data:${mime};base64,${bytes.toString('base64')}`);
@@ -390,12 +390,12 @@ function installMenu() {
   Menu.setApplicationMenu(null);
 }
 async function registerProtocols() {
-  protocol.handle('replica', async request => {
+  protocol.handle('moye', async request => {
     const url = new URL(request.url); const file = path.resolve(assetRoot, `.${decodeURIComponent(url.pathname)}`);
     if (url.hostname !== 'app' || !file.startsWith(assetRoot + path.sep)) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(file).href);
   });
-  protocol.handle('replica-media', async request => {
+  protocol.handle('moye-media', async request => {
     const missing = () => new Response('Not found', { status: 404 });
     try {
       if (request.method !== 'GET') return missing();
@@ -436,8 +436,8 @@ else {
   void app.whenReady().then(async () => {
     const migration = await migrateUserData(profile);
     if (migration?.notice) store.recoveryNotices.push(migration.notice);
-    if (process.platform === 'win32' && app.isPackaged && !process.env.TYPORA_REPLICA_USER_DATA && process.env.TYPORA_REPLICA_TEST !== '1') {
-      void repairWindowsShortcuts(shell, process.execPath, app.getPath('appData'), appIconPath).catch(error => console.error('Shortcut repair:', error));
+    if (process.platform === 'win32' && app.isPackaged && !process.env.MOYE_USER_DATA && process.env.MOYE_TEST !== '1') {
+      void repairWindowsIntegration(shell, process.execPath, app.getPath('appData'), appIconPath, undefined, app.getPath('desktop')).catch(error => console.error('Windows integration:', error));
       app.setUserTasks([{ program: process.execPath, arguments: '--new-window', iconPath: appIconPath, iconIndex: 0, title: '新建窗口', description: '新建一个墨页窗口' }]);
     }
     await store.initialize(); await updates.takeResult(migration?.migratedFrom); if (store.preferences.codeTheme === 'vscode') { await codeTheme.refresh(); codeTheme.start(); }
@@ -447,7 +447,7 @@ else {
     if (!store.windows.size) { const id = store.newWindow(); store.newDocument(id); }
     for (const id of store.windows.keys()) createWindow(id);
     if (process.argv.includes('--new-window') && [...store.documents.values()].some(doc => doc.path || doc.content)) newBlankWindow();
-    if (process.env.TYPORA_REPLICA_TEST === '1') (globalThis as any).__replicaTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts, pdfPreviews, setUpdateRequest: (request: typeof updateRequest) => { updateRequest = request; } };
+    if (process.env.MOYE_TEST === '1') (globalThis as any).__moyeTest = { store, windows, openFile, createWindow, relaunchCommand, codeTheme, appId, appIconPath, repairWindowsShortcuts, pdfPreviews, setUpdateRequest: (request: typeof updateRequest) => { updateRequest = request; } };
     const target = process.argv.includes('--new-window') ? [...windows.keys()].at(-1)! : [...windows.keys()][0]; for (const file of initialFiles) await openFile(target, file).catch(error => notify(windows.get(target)!, error.message));
     launchReady = true; for (const request of queuedLaunches.splice(0)) handleLaunch(request.argv, request.cwd);
   }).catch(error => { console.error(error); dialog.showErrorBox(`${APP_NAME} 无法启动`, error.message); app.exit(1); });

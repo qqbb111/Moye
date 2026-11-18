@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PortableUpdates, updateAsset } from '../electron/portable-updates';
+import { PortableUpdates, updateAsset, validateUpdateManifest } from '../electron/portable-updates';
 
 const bytes = Buffer.from('test archive');
 const asset = {
@@ -21,6 +21,17 @@ test('更新仅接受更高的正式版本与指定仓库的已校验 Windows ZI
   assert.throws(() => updateAsset({ ...release, prerelease: true }, '0.9.9'), /无法识别/);
   for (const change of [{ state: 'starter' }, { digest: '' }, { size: -1 }, { browser_download_url: 'https://example.org/update.zip' }]) {
     assert.throws(() => updateAsset({ ...release, assets: [{ ...asset, ...change }] }, '0.9.9'), /未提供可校验/);
+  }
+});
+
+test('更新包兼容新旧应用标识，仍须和发布版本一致', () => {
+  const version = '0.9.10';
+  for (const name of ['moye', 'typora-replica']) {
+    assert.doesNotThrow(() => validateUpdateManifest({ name, version }, version));
+    assert.throws(() => validateUpdateManifest({ name, version: '0.9.9' }, version), /应用版本与发布记录不符/);
+  }
+  for (const metadata of [null, { version }, { name: 'typora', version }, { name: 'Moye', version }]) {
+    assert.throws(() => validateUpdateManifest(metadata, version), /应用版本与发布记录不符/);
   }
 });
 

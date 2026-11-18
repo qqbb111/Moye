@@ -3,13 +3,13 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseMarkdown, walk, startOf, endOf } from '../src/markdown';
 import { applyEdits, type TextEdit } from '../shared/markdown-tools';
+import { draftImageName } from '../shared/media-url';
 
 const extensions = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
 const mimeTypes: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.avif': 'image/avif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
 };
-const draft = /^replica-media:\/\/draft\/([a-f0-9]{64}\.(?:png|jpe?g|gif|webp|svg|avif|bmp|ico))$/i;
 const limit = 20 * 1024 * 1024;
 const portablePath = (file: string) => file.replaceAll('\\', '/').replace(/[% #?()[\]<>]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -91,12 +91,12 @@ export class ImageAttachments {
     const extension = path.extname(name).toLowerCase().replace('.jpeg', '.jpg');
     const filename = digest(bytes) + extension;
     await writeImage(await privateDirectory(this.directory, true), filename, bytes, this.write);
-    return `replica-media://draft/${filename}`;
+    return `moye-media://draft/${filename}`;
   }
   async readDraft(url: string) {
-    const match = draft.exec(url);
-    if (!match) return null;
-    try { return await storedImage(await privateDirectory(this.directory, false), match[1]); }
+    const name = draftImageName(url);
+    if (!name) return null;
+    try { return await storedImage(await privateDirectory(this.directory, false), name); }
     catch { return null; }
   }
   async materialize(source: string, target?: string, previousFile?: string | null) {

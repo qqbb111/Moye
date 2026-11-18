@@ -4,8 +4,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const packaged = process.argv.includes('--packaged'); const directory = path.resolve('.test-data', `quote-smoke-${randomUUID()}`); await fs.mkdir(directory, { recursive: true });
-const env = { ...process.env, TYPORA_REPLICA_USER_DATA: path.join(directory, 'profile'), TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
-const application = await electron.launch({ executablePath: packaged ? path.resolve(process.env.TYPORA_REPLICA_PREVIEW_EXE ?? 'release/Typora Replica-win32-x64/Typora Replica.exe') : electronPath, args: packaged ? [] : ['.'], env }); const errors = [];
+const env = { ...process.env, MOYE_USER_DATA: path.join(directory, 'profile'), MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+const application = await electron.launch({ executablePath: packaged ? path.resolve(process.env.MOYE_PREVIEW_EXE ?? 'release/Moye-win32-x64/Moye.exe') : electronPath, args: packaged ? [] : ['.'], env }); const errors = [];
 try {
   const page = await application.firstWindow(); page.on('pageerror', error => errors.push(error.message)); await page.locator('.markdown-editor').waitFor(); const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1000, height: 760 }); window.showInactive(); }); await page.evaluate(() => window.__editor.execute('copilot'));
   const content = () => page.evaluate(() => window.__editor.content()); await page.locator('.markdown-editor .cm-content').click(); await page.keyboard.press('Control+Shift+Q'); expect(await content()).toBe('> ');

@@ -47,6 +47,14 @@ export function updateAsset(release: GitHubRelease, installed: string): UpdateAs
   return { version, url, sha256: asset.digest.slice(7), size: asset.size! };
 }
 
+export function validateUpdateManifest(metadata: unknown, version: string) {
+  // Previous Windows releases require the legacy package identifier to be able to update.
+  if (!metadata || typeof metadata !== 'object' || !('version' in metadata) || metadata.version !== version ||
+      !('name' in metadata) || (metadata.name !== 'moye' && metadata.name !== 'typora-replica')) {
+    throw new Error('更新包内的应用版本与发布记录不符。');
+  }
+}
+
 interface Options {
   version: string;
   executable: string;
@@ -122,7 +130,7 @@ export class PortableUpdates {
       this.set({ phase: 'preparing', version: asset.version });
       await this.helper(stage, 'extract');
       const metadata = JSON.parse(await fs.readFile(path.join(stage, 'payload', 'resources', 'app.asar', 'package.json'), 'utf8'));
-      if (metadata.version !== asset.version || metadata.name !== 'typora-replica') throw new Error('更新包内的应用版本与发布记录不符。');
+      validateUpdateManifest(metadata, asset.version);
       this.stage = stage;
       this.set({ phase: 'ready', version: asset.version });
     } catch (error) {

@@ -25,8 +25,8 @@ const draft = '重启后保留的草稿';
 const errors = [];
 
 async function launch(args = []) {
-  const env = { ...process.env, TYPORA_REPLICA_USER_DATA: profile };
-  for (const name of ['ELECTRON_RUN_AS_NODE', 'TYPORA_REPLICA_TEST', 'TYPORA_REPLICA_DEV_URL']) delete env[name];
+  const env = { ...process.env, MOYE_USER_DATA: profile };
+  for (const name of ['ELECTRON_RUN_AS_NODE', 'MOYE_TEST', 'MOYE_DEV_URL']) delete env[name];
   const application = await electron.launch({ executablePath, args, cwd: unpacked, env });
   const watch = page => page.on('pageerror', error => errors.push(error.message));
   application.on('window', watch);
@@ -51,10 +51,10 @@ async function inspectAbout(application, page) {
 async function runTargetedTests() {
   const cli = createRequire(import.meta.url).resolve('@playwright/test/cli');
   const output = path.join(scratch, 'test-results');
-  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单|旧版用户数据迁移后恢复草稿、图片和设置';
+  const grep = '原位重命名|设置分类的鼠标|有序列表|组合输入一个 f|更新退出参数|恢复记录写入失败时保留原窗口|长文编辑后只同步状态|文档目录内的相对图片|旧版内嵌图片|打印预览用实际 PDF|打印缺图的文档|PDF 预览拒绝跨窗口|文楷主题离线|透明主题可从菜单|旧版用户数据迁移后恢复草稿、图片和设置|文件树、相对图片、HTML 和 PDF 导出|任务栏|Windows 快捷方式';
   const code = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '--grep', grep, '--output', output], {
-      cwd: root, env: { ...process.env, TYPORA_REPLICA_TEST_EXE: executablePath }, stdio: 'inherit', windowsHide: true,
+      cwd: root, env: { ...process.env, MOYE_TEST_EXE: executablePath }, stdio: 'inherit', windowsHide: true,
     });
     child.once('error', reject);
     child.once('close', resolve);
@@ -74,7 +74,7 @@ try {
   await fs.mkdir(unpacked);
   const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
   await exec(tar, ['-xf', zip, '-C', unpacked], { windowsHide: true });
-  await fs.copyFile(path.join(root, 'assets', 'replica.png'), path.join(scratch, '图片.png'));
+  await fs.copyFile(path.join(root, 'assets', 'moye.png'), path.join(scratch, '图片.png'));
   await fs.writeFile(note, `# ${heading}\n\n便携版中文正文\n\n![本地图片](图片.png)\n`);
 
   application = await launch([note]);

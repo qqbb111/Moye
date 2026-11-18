@@ -6,5 +6,6 @@ const renderer = await viteBuild({ base: './', build: { outDir: 'dist', emptyOut
 await build({ entryPoints: ['electron/main.ts'], outfile: 'dist-electron/main.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', mainFields: ['module', 'main'], external: ['electron'], sourcemap: true });
 await build({ entryPoints: ['electron/preload.ts'], outfile: 'dist-electron/preload.cjs', bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'], sourcemap: true });
 await fs.copyFile('electron/portable-update.ps1', 'dist-electron/portable-update.ps1');
+await fs.copyFile('electron/windows-associations.ps1', 'dist-electron/windows-associations.ps1');
 const files = [...new Set((Array.isArray(renderer) ? renderer : [renderer]).flatMap(bundle => bundle.output.map(item => item.fileName)))].sort();
 await fs.writeFile('dist-electron/renderer-files.json', JSON.stringify({ files, indexHash: createHash('sha256').update(await fs.readFile('dist/index.html')).digest('hex') }));

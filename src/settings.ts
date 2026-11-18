@@ -62,8 +62,8 @@ export class Settings {
     });
     this.get<HTMLButtonElement>('#settings-close').onclick = () => this.dialog.close();
     this.get<HTMLButtonElement>('#check-update').onclick = () => void this.performUpdate();
-    window.rypota.onPortableUpdate(state => this.renderUpdate(state));
-    void window.rypota.portableUpdate('status').then(state => this.renderUpdate(state)).catch(() => {});
+    window.moye.onPortableUpdate(state => this.renderUpdate(state));
+    void window.moye.portableUpdate('status').then(state => this.renderUpdate(state)).catch(() => {});
     this.get<HTMLInputElement>('#shortcut-search').oninput = () => { this.recording = null; this.message(''); this.renderCommands(); };
     for (const button of this.dialog.querySelectorAll<HTMLButtonElement>('[data-shortcut-category]')) button.onclick = () => {
       this.category = button.dataset.shortcutCategory!;
@@ -103,7 +103,7 @@ export class Settings {
     const actions: Partial<Record<UpdateState['phase'], UpdateAction>> = { idle: 'check', current: 'check', error: 'check', available: 'download', downloading: 'cancel', ready: 'install' };
     const action = actions[this.updateState.phase];
     if (!action) return;
-    try { this.renderUpdate(await window.rypota.portableUpdate(action)); }
+    try { this.renderUpdate(await window.moye.portableUpdate(action)); }
     catch { this.renderUpdate({ phase: 'error', message: '无法更新，请重试。' }); }
   }
   private renderUpdate(state: UpdateState) {

@@ -37,9 +37,9 @@ test.afterEach(async () => {
 
 async function launch(profile?: string, extraEnv: NodeJS.ProcessEnv = {}) {
   const directory = await testDirectory(); profile ??= path.join(directory, 'profile');
-  const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_USER_DATA: profile, ...extraEnv, TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
-  const executablePath = process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string;
-  const application = await electron.launch({ executablePath, args: process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.'], cwd: root, env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) });
+  const env: NodeJS.ProcessEnv = { ...process.env, MOYE_USER_DATA: profile, ...extraEnv, MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+  const executablePath = process.env.MOYE_TEST_EXE ?? electronPath as unknown as string;
+  const application = await electron.launch({ executablePath, args: process.env.MOYE_TEST_EXE ? [] : ['.'], cwd: root, env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) });
   applications.add(application);
   application.once('close', () => applications.delete(application));
   const page = await application.firstWindow(); await page.locator('.editor-slot:not([hidden]) .markdown-editor').waitFor();
@@ -57,10 +57,10 @@ async function toolbarAction(page: Page, section: string, action: string) {
 }
 async function chooseSave(application: ElectronApplication, file: string) { await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); }
 async function requestUpdateQuit(profile: string) {
-  const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_TEST: '1', TYPORA_REPLICA_USER_DATA: profile };
+  const env: NodeJS.ProcessEnv = { ...process.env, MOYE_TEST: '1', MOYE_USER_DATA: profile };
   delete env.ELECTRON_RUN_AS_NODE;
-  await promisify(execFile)(process.env.TYPORA_REPLICA_TEST_EXE ?? electronPath as unknown as string,
-    [...(process.env.TYPORA_REPLICA_TEST_EXE ? [] : ['.']), '--quit-for-update'], { cwd: root, env, timeout: 15000 });
+  await promisify(execFile)(process.env.MOYE_TEST_EXE ?? electronPath as unknown as string,
+    [...(process.env.MOYE_TEST_EXE ? [] : ['.']), '--quit-for-update'], { cwd: root, env, timeout: 15000 });
 }
 
 test('文件菜单、目录进退、资源管理器、另存为和原位重命名贯通桌面入口', async ({}, testInfo) => {
@@ -97,7 +97,7 @@ test('文件菜单、目录进退、资源管理器、另存为和原位重命�
     await expect(sidebar.locator('.folder-heading')).toHaveText('笔记');
     const enter = sidebar.getByRole('button', { name: '进入 算法', exact: true });
     await expect(enter).toBeFocused();
-    await expect(page.evaluate(({ rootFolder, directory }) => window.rypota.openChildFolder(rootFolder, directory), { rootFolder, directory })).rejects.toThrow('文件不在当前文件夹中');
+    await expect(page.evaluate(({ rootFolder, directory }) => window.moye.openChildFolder(rootFolder, directory), { rootFolder, directory })).rejects.toThrow('文件不在当前文件夹中');
     await screenshot('folder-enter.png');
     await enter.press('Enter');
     await expect(sidebar.locator('.folder-heading')).toHaveText('算法');
@@ -218,12 +218,12 @@ test('长文编辑后只同步状态，切到另一窗口时发送新文档正�
   try {
     const long = '# 长文\n\n' + '用于验证工作区更新的正文。\n\n'.repeat(1800);
     await setContent(page, long);
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content.length)).toBe(long.length);
-    const revision = await page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].revision);
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).documents[0].content.length)).toBe(long.length);
+    const revision = await page.evaluate(async () => (await window.moye.bootstrap()).documents[0].revision);
     await page.evaluate(() => {
       const updates: import('../shared/types').WorkspaceUpdate[] = [];
       (window as any).__workspaceUpdates = updates;
-      window.rypota.onState(update => updates.push(update));
+      window.moye.onState(update => updates.push(update));
     });
     await current(page).locator('.cm-content').focus();
     await page.keyboard.press('Control+End');
@@ -256,7 +256,7 @@ test('快捷键名称仅录制绑定，说明按需显示且设置控件可通�
     await page.getByRole('button', { name: '了解中文排版整理' }).focus(); await page.keyboard.press('Enter'); await expect(page.getByRole('tooltip')).toBeVisible();
     await page.keyboard.press('Escape'); await expect(page.getByRole('tooltip')).toBeHidden(); await expect(page.locator('#preferences')).toBeVisible();
     const toggle = page.getByRole('switch', { name: '保存前整理中文排版', exact: true }); await toggle.focus(); await page.keyboard.press('Space'); await expect(toggle).toBeChecked();
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.formatOnSave)).toBe(true);
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.formatOnSave)).toBe(true);
     await expect(page.locator('#preferences')).toBeVisible();
     expect(await content(page)).toBe(raw);
   } finally { await application.close(); }
@@ -315,7 +315,7 @@ test('透明主题可从菜单启用，调节不透明度并在多窗口和重�
     await expect(slider).toHaveValue('74');
     await slider.press('End');
     await expect(slider).toHaveAttribute('aria-valuetext', '90%');
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.windowOpacity)).toBe(90);
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.windowOpacity)).toBe(90);
     await checkWindowOpacity(application, page, .90);
     await page.getByRole('button', { name: '关闭设置' }).click();
     const file = path.join(directory, '透明笔记.html');
@@ -420,7 +420,7 @@ test('2026 代码主题独立于正文主题，设置文字不可拖选而输入
     await picker.selectOption('light-2026');
     await expect(block).toHaveCSS('background-color', 'rgb(255, 255, 255)');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.codeTheme)).toBe('light-2026');
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.codeTheme)).toBe('light-2026');
 
     await page.getByRole('tab', { name: '快捷键' }).click();
     const heading = page.locator('.settings-header h2');
@@ -467,7 +467,7 @@ test('编辑器右键菜单跟随主题，键盘复制保留表格选区', async
     await page.keyboard.press('Enter');
     await expect(menu).toBeHidden();
     await expect(cell).toBeFocused();
-    expect(await page.evaluate(() => window.rypota.clipboard('read'))).toBe('格选');
+    expect(await page.evaluate(() => window.moye.clipboard('read'))).toBe('格选');
   } finally { await application.close(); }
 });
 
@@ -479,7 +479,7 @@ test('文件冲突使用应用弹窗，取消保留两份内容并可另存或�
     const save = () => page.evaluate(() => { void (window as any).__editor.execute('save'); });
     await fs.writeFile(original, '打开时的内容');
     await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, original);
-    await page.evaluate(() => window.rypota.updatePreferences({ autoSave: false, theme: 'light' }));
+    await page.evaluate(() => window.moye.updatePreferences({ autoSave: false, theme: 'light' }));
     await execute(page, 'open');
     await setContent(page, '我的修改');
     await fs.writeFile(original, '磁盘修改');
@@ -553,7 +553,7 @@ test('恢复记录写入失败时保留原窗口，解除故障后退出并恢�
     const second = await secondOpened;
     await second.locator('.markdown-editor').waitFor();
     await application.evaluate(() => {
-      const store = (globalThis as any).__replicaTest.store;
+      const store = (globalThis as any).__moyeTest.store;
       const persist = store.persist.bind(store);
       store.persist = (closedWindow?: string) => closedWindow ? Promise.reject(new Error('模拟关闭状态写入失败')) : persist();
       (globalThis as any).__resumePersistence = () => { store.persist = persist; };
@@ -569,7 +569,7 @@ test('恢复记录写入失败时保留原窗口，解除故障后退出并恢�
     await closed;
     await instance.application.close();
     instance = await launch(profile);
-    await expect.poll(() => instance.page.evaluate(async () => (await window.rypota.bootstrap()).drafts.map(draft => draft.content))).toContain('失败后依然可以写入草稿');
+    await expect.poll(() => instance.page.evaluate(async () => (await window.moye.bootstrap()).drafts.map(draft => draft.content))).toContain('失败后依然可以写入草稿');
   } finally {
     if (instance.application.process().exitCode === null) {
       await instance.application.evaluate(() => (globalThis as any).__resumePersistence?.()).catch(() => {});
@@ -594,7 +594,7 @@ test('设置集中分类，操作保留正文与表格选区，快捷键录制�
     await page.getByRole('navigation', { name: '快捷键分类' }).getByRole('button', { name: '格式', exact: true }).click();
     await page.getByRole('button', { name: '修改加粗快捷键', exact: true }).click(); await page.keyboard.press('Control+i'); await expect(page.locator('#shortcut-message')).toContainText('冲突');
     await page.keyboard.press('Control+Alt+b'); await expect(page.locator('[data-shortcut-id="bold"]')).toHaveText('Ctrl+Alt+B');
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.shortcuts?.bold)).toBe('Ctrl+Alt+B');
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.shortcuts?.bold)).toBe('Ctrl+Alt+B');
     await page.locator('#settings-close').click();
     await setContent(page, '选择'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 2 } }); e.focus(); });
     await page.keyboard.press('Control+b'); expect(await content(page)).toBe('选择');
@@ -614,7 +614,7 @@ test('设置集中分类，操作保留正文与表格选区，快捷键录制�
 test('重绑撤销和粘贴作用于代码编辑器，旧快捷键停用且高亮可清除', async () => {
   const { application, page } = await launch();
   try {
-    await page.evaluate(() => window.rypota.updatePreferences({ shortcuts: { undo: 'Alt+U', redo: 'Alt+R', paste: 'Alt+V', highlight: '' } }));
+    await page.evaluate(() => window.moye.updatePreferences({ shortcuts: { undo: 'Alt+U', redo: 'Alt+R', paste: 'Alt+V', highlight: '' } }));
     await setContent(page, '```cpp\nint value = 1;\n```\n\n正文');
     const code = current(page).locator('.code-content .cm-content'); await code.click(); await page.keyboard.press('Control+End'); await page.keyboard.insertText(' // 新内容');
     await page.keyboard.press('Control+z'); expect(await content(page)).toContain('// 新内容');
@@ -623,7 +623,7 @@ test('重绑撤销和粘贴作用于代码编辑器，旧快捷键停用且高�
     await application.evaluate(({ clipboard }) => clipboard.writeText('粘贴')); await page.keyboard.press('Alt+v'); await expect.poll(() => content(page)).toContain('新内容粘贴');
     await setContent(page, '选中文字'); await page.evaluate(() => { const e = (window as any).__editor.active(); e.view.dispatch({ selection: { anchor: 0, head: 2 } }); e.focus(); });
     await page.keyboard.insertText('='); expect(await content(page)).toBe('=文字');
-    await page.evaluate(() => window.rypota.updatePreferences({ shortcuts: {} }));
+    await page.evaluate(() => window.moye.updatePreferences({ shortcuts: {} }));
   } finally { await application.close(); }
 });
 
@@ -710,7 +710,7 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
     await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
     await page.locator('#print-zoom').selectOption('0.75'); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible(); await page.locator('#print-zoom').selectOption('fit');
     const token = await page.locator('#print-preview').getAttribute('data-preview-id');
-    const bytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__replicaTest; return [...api.pdfPreviews.get([...api.windows.keys()][0], token).bytes]; }, token);
+    const bytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__moyeTest; return [...api.pdfPreviews.get([...api.windows.keys()][0], token).bytes]; }, token);
     const destination = path.join(directory, 'print-preview.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible();
     expect(Buffer.from(await fs.readFile(destination)).equals(Buffer.from(bytes))).toBe(true); expect(await content(page)).toBe(raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await execute(page, 'export-pdf'); await expect(page.locator('#print-layout')).toHaveValue('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9.5'); await expect(page.locator('#print-lines')).not.toBeChecked();
@@ -718,7 +718,7 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
     await page.evaluate(() => (window as any).__editor.setContent('# 原文已更新')); await expect(page.locator('#print-stale')).toBeVisible();
     await page.locator('#print-refresh').click(); await expect(page.locator('#print-stale')).toBeHidden(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
     const closedToken = await page.locator('#print-preview').getAttribute('data-preview-id'); await page.keyboard.press('Escape'); await expect(page.locator('#print-preview')).not.toBeVisible();
-    const result = await page.evaluate(token => window.rypota.savePdf(token!), closedToken); expect(result.ok).toBe(false);
+    const result = await page.evaluate(token => window.moye.savePdf(token!), closedToken); expect(result.ok).toBe(false);
     expect(errors).toEqual([]);
   } finally { await application.close(); }
 });
@@ -729,10 +729,10 @@ test('打印缺图的文档时保留占位和正文，并能保存预览文件',
     const file = path.join(directory, '打印.md');
     const raw = '# 打印样例\n\nBEFORE_IMAGE\n\n![有效本地图](valid.png)\n\n![缺失本地图](missing.png)\n\n![网络图](https://example.invalid/image.png)\n\n![损坏的图片](damaged.png)\n\nAFTER_IMAGE';
     await fs.writeFile(file, raw);
-    await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(directory, 'valid.png'));
+    await fs.copyFile(path.join(root, 'assets/moye.png'), path.join(directory, 'valid.png'));
     await fs.writeFile(path.join(directory, 'damaged.png'), 'invalid image data');
     await page.route('https://example.invalid/**', route => route.abort());
-    await application.evaluate((_electron, file) => { const api = (globalThis as any).__replicaTest; return api.openFile([...api.windows.keys()][0], file); }, file);
+    await application.evaluate((_electron, file) => { const api = (globalThis as any).__moyeTest; return api.openFile([...api.windows.keys()][0], file); }, file);
     await expect.poll(() => content(page)).toBe(raw);
     await execute(page, 'export-pdf');
     await expect(page.locator('#print-status')).toHaveText('3 张图片不可用，已在原位置标注。', { timeout: 30000 });
@@ -761,32 +761,32 @@ test('打印缺图的文档时保留占位和正文，并能保存预览文件',
 test('PDF 预览拒绝跨窗口保存与无效选项，过期排版结果和关闭后的缓存不可保存', async () => {
   const { application, page } = await launch();
   try {
-    const id = await page.evaluate(async () => (await window.rypota.bootstrap()).activeId!);
+    const id = await page.evaluate(async () => (await window.moye.bootstrap()).activeId!);
     await application.evaluate(({ app }) => { (globalThis as any).__pdfWindows = 0; app.on('browser-window-created', () => { (globalThis as any).__pdfWindows++; }); });
     const html = '<!doctype html><html><head></head><body>PRINT JOB</body></html>';
     const options = { layout: 'portrait' as const, color: 'mono' as const, codeFontPt: 10, lineNumbers: true };
-    const result = await page.evaluate(async ({ id, html, options }) => Promise.all([window.rypota.previewPdf(id, html, options), window.rypota.previewPdf(id, html, options)]), { id, html, options });
+    const result = await page.evaluate(async ({ id, html, options }) => Promise.all([window.moye.previewPdf(id, html, options), window.moye.previewPdf(id, html, options)]), { id, html, options });
     expect(result[0].ok).toBe(false); expect(result[1].ok).toBe(true); if (!result[1].ok) throw new Error('Latest preview was not retained');
     let token = result[1].previewId;
     const beforeCache = await application.evaluate(() => (globalThis as any).__pdfWindows);
-    const beforeBytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__replicaTest; return api.pdfPreviews.get([...api.windows.keys()][0], token).bytes.toString('base64'); }, token);
-    await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
-    const cached = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options }); if (!cached.ok) throw new Error('Cached preview failed');
+    const beforeBytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__moyeTest; return api.pdfPreviews.get([...api.windows.keys()][0], token).bytes.toString('base64'); }, token);
+    await page.evaluate(() => window.moye.releasePdf()); expect((await page.evaluate(token => window.moye.savePdf(token), token)).ok).toBe(false);
+    const cached = await page.evaluate(({ id, html, options }) => window.moye.previewPdf(id, html, options), { id, html, options }); if (!cached.ok) throw new Error('Cached preview failed');
     expect(cached.previewId).not.toBe(token); token = cached.previewId;
     expect(Buffer.from(cached.bytes).toString('base64')).toBe(beforeBytes); expect(await application.evaluate(() => (globalThis as any).__pdfWindows)).toBe(beforeCache);
-    const changed = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html.replace('PRINT JOB', 'CHANGED JOB'), options), { id, html, options }); expect(changed.ok).toBe(true);
+    const changed = await page.evaluate(({ id, html, options }) => window.moye.previewPdf(id, html.replace('PRINT JOB', 'CHANGED JOB'), options), { id, html, options }); expect(changed.ok).toBe(true);
     if (changed.ok) token = changed.previewId;
     expect(await application.evaluate(() => (globalThis as any).__pdfWindows)).toBe(beforeCache + 1);
-    const invalid = await page.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, { ...options, codeFontPt: 0 }), { id, html, options }); expect(invalid.ok).toBe(false);
+    const invalid = await page.evaluate(({ id, html, options }) => window.moye.previewPdf(id, html, { ...options, codeFontPt: 0 }), { id, html, options }); expect(invalid.ok).toBe(false);
     await execute(page, 'new-window'); await expect.poll(() => application.windows().length).toBe(2); const other = application.windows().find(window => window !== page)!; await other.locator('.markdown-editor').waitFor();
-    expect((await other.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
-    expect((await other.evaluate(({ id, html, options }) => window.rypota.previewPdf(id, html, options), { id, html, options })).ok).toBe(false);
-    const broken = await page.evaluate(({ id, options }) => window.rypota.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options });
+    expect((await other.evaluate(token => window.moye.savePdf(token), token)).ok).toBe(false);
+    expect((await other.evaluate(({ id, html, options }) => window.moye.previewPdf(id, html, options), { id, html, options })).ok).toBe(false);
+    const broken = await page.evaluate(({ id, options }) => window.moye.previewPdf(id, '<html><head></head><body><img src="data:image/png;base64,bad"></body></html>', options), { id, options });
     expect(broken).toMatchObject({ ok: true, missingImages: 1 });
-    await page.evaluate(() => window.rypota.releasePdf()); expect((await page.evaluate(token => window.rypota.savePdf(token), token)).ok).toBe(false);
-    const owner = await page.evaluate(async () => (await window.rypota.bootstrap()).windowId);
+    await page.evaluate(() => window.moye.releasePdf()); expect((await page.evaluate(token => window.moye.savePdf(token), token)).ok).toBe(false);
+    const owner = await page.evaluate(async () => (await window.moye.bootstrap()).windowId);
     const native = await application.browserWindow(page); await native.evaluate(window => window.close());
-    await expect.poll(() => application.evaluate((_electron, owner) => !(globalThis as any).__replicaTest.pdfPreviews.recent.has(owner), owner)).toBe(true);
+    await expect.poll(() => application.evaluate((_electron, owner) => !(globalThis as any).__moyeTest.pdfPreviews.recent.has(owner), owner)).toBe(true);
   } finally { await application.close(); }
 });
 
@@ -821,7 +821,7 @@ test('长文先排版开头，整份完成前不可保存，接收旧请求的�
     await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); expect(Number.parseInt(await page.locator('#print-page-count').innerText())).toBeGreaterThan(1);
     const token = await page.locator('#print-preview').getAttribute('data-preview-id'); const count = await page.locator('.print-page').count();
     await application.evaluate(({ }, first) => {
-      const api = (globalThis as any).__replicaTest; api.windows.values().next().value.webContents.send('pdf:first-page', { requestId: '00000000-0000-0000-0000-000000000000', documentId: 'wrong-document', bytes: new Uint8Array(Buffer.from(first, 'base64')) });
+      const api = (globalThis as any).__moyeTest; api.windows.values().next().value.webContents.send('pdf:first-page', { requestId: '00000000-0000-0000-0000-000000000000', documentId: 'wrong-document', bytes: new Uint8Array(Buffer.from(first, 'base64')) });
     }, first);
     await expect(page.locator('.print-page')).toHaveCount(count); await expect(page.locator('#print-preview')).toHaveAttribute('data-preview-id', token!);
     const last = page.locator('.print-page').last();
@@ -910,24 +910,44 @@ test('段落回车后的退格和 Delete 整体合并，保留 Shift+Enter 和�
   } finally { await application.close(); }
 });
 
-test('Windows 快捷方式补齐稳定应用标识，保护其他应用和文档专属入口', async () => {
+test('Windows 快捷方式迁移到墨页标识并保留已有固定位置', async () => {
   test.skip(process.platform !== 'win32'); const { application, directory, profile } = await launch();
   try {
     const pin = path.join(directory, 'Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar'); await fs.mkdir(pin, { recursive: true });
-    const links = { legacy: path.join(pin, '旧入口.lnk'), other: path.join(pin, '其他应用.lnk'), document: path.join(pin, '某份文档.lnk'), start: path.join(directory, 'Microsoft/Windows/Start Menu/Programs/墨页 Moye.lnk'), otherExe: path.join(directory, 'other.exe') };
+    const desktop = path.join(directory, 'Desktop'); await fs.mkdir(desktop);
+    const programs = path.join(directory, 'Microsoft/Windows/Start Menu/Programs'); await fs.mkdir(programs, { recursive: true });
+    const links = {
+      pin: path.join(pin, '墨页 Moye.lnk'), other: path.join(pin, '其他应用.lnk'), document: path.join(pin, '某份文档.lnk'),
+      start: path.join(programs, '墨页 Moye.lnk'), oldStart: path.join(programs, 'Typora Replica Markdown 编辑器.lnk'),
+      desktop: path.join(desktop, '墨页 Moye.lnk'), oldDesktop: path.join(desktop, 'Rypota.lnk'),
+      oldExecutable: path.join(directory, 'Typora Replica.exe'), otherExe: path.join(directory, 'Typora.exe'),
+    };
     await application.evaluate(({ shell }, links) => {
-      shell.writeShortcutLink(links.legacy, { target: process.execPath, args: '--new-window', description: '旧名称' });
+      shell.writeShortcutLink(links.pin, { target: links.oldExecutable, args: '--new-window', description: '旧名称', appUserModelId: 'HanHan.TyporaReplica' });
+      shell.writeShortcutLink(links.oldStart, { target: links.oldExecutable, description: '旧名称' });
+      shell.writeShortcutLink(links.oldDesktop, { target: links.oldExecutable, description: '旧名称' });
       shell.writeShortcutLink(links.other, { target: links.otherExe, appUserModelId: 'Other.App' });
       shell.writeShortcutLink(links.document, { target: process.execPath, args: 'document.md', appUserModelId: 'Document.App' });
     }, links);
     const beforeOther = await fs.readFile(links.other), beforeDocument = await fs.readFile(links.document);
-    const result = await application.evaluate(async ({ app, shell }, { directory, links }) => {
-      const api = (globalThis as any).__replicaTest;
-      const outcome = await api.repairWindowsShortcuts(shell, process.execPath, directory, api.appIconPath);
-      return { ...outcome, legacy: shell.readShortcutLink(links.legacy), start: shell.readShortcutLink(links.start), appId: api.appId, userData: app.getPath('userData') };
-    }, { directory, links });
-    expect(result.failed).toEqual([]); expect(result.updated).toHaveLength(2); expect(result.legacy.appUserModelId).toBe('HanHan.TyporaReplica'); expect(result.start.appUserModelId).toBe(result.appId);
-    expect(result.legacy.description).toBe('墨页 Moye'); expect(result.legacy.args).toBe('--new-window'); expect(result.legacy.icon).toBe(result.start.icon); expect(beforeOther.equals(await fs.readFile(links.other))).toBe(true); expect(beforeDocument.equals(await fs.readFile(links.document))).toBe(true); expect(result.userData).toBe(profile);
+    const result = await application.evaluate(async ({ app, shell }, { directory, desktop, links }) => {
+      const api = (globalThis as any).__moyeTest;
+      const outcome = await api.repairWindowsShortcuts(shell, process.execPath, directory, api.appIconPath, true, [links.oldExecutable], desktop);
+      return { ...outcome, links: [links.pin, links.start, links.desktop].map(file => shell.readShortcutLink(file)), executable: process.execPath, userData: app.getPath('userData') };
+    }, { directory, desktop, links });
+    expect(result.failed).toEqual([]); expect(result.updated).toHaveLength(3);
+    for (const shortcut of result.links) {
+      expect(shortcut.target).toBe(result.executable);
+      expect(shortcut.appUserModelId).toBe('HanHan.Moye');
+      expect(shortcut.description).toBe('墨页 Moye');
+      expect(shortcut.icon).toBe(result.links[0].icon);
+    }
+    expect(result.links[0].args).toBe('--new-window');
+    await expect(fs.stat(links.oldStart)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(links.oldDesktop)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(beforeOther.equals(await fs.readFile(links.other))).toBe(true);
+    expect(beforeDocument.equals(await fs.readFile(links.document))).toBe(true);
+    expect(result.userData).toBe(profile);
   } finally { await application.close(); }
 });
 
@@ -940,7 +960,7 @@ test('文楷主题离线使用应用内嵌字形', async () => {
     await cdp.send('DOM.enable');
     await cdp.send('CSS.enable');
     for (const theme of ['light', 'dark', 'copilot'] as const) {
-      await page.evaluate(theme => window.rypota.updatePreferences({ theme }), theme);
+      await page.evaluate(theme => window.moye.updatePreferences({ theme }), theme);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       const line = current(page).locator('.cm-line').filter({ hasText: '霞鹜文楷用于中文正文。' });
       await line.evaluate(async element => {
@@ -1028,7 +1048,7 @@ test('长代码可横向滚动或悬挂折行，切换不改原文和撤销并�
   let app = await launch(); const code = 'void build(int n) {\n    for (int i = 1; i <= n; ++i) dfn[i] = scc[i] = szc[i] = in[i] = vis[i] = 0, graph[i].clear(), reverse_graph[i].clear();\n}'; const raw = `# 算法笔记\n\n\`\`\`cpp\n${code}\n\`\`\`\n\n结尾`;
   try {
     const native = await app.application.browserWindow(app.page); await native.evaluate(window => { window.setBounds({ width: 920, height: 760 }); window.showInactive(); });
-    await app.page.evaluate(() => window.rypota.updatePreferences({ codeWrap: false }));
+    await app.page.evaluate(() => window.moye.updatePreferences({ codeWrap: false }));
     await setContent(app.page, raw); const block = current(app.page).locator('.md-code'); const scroller = block.locator('.cm-scroller'); const wrap = block.getByRole('button', { name: '代码自动换行', exact: true });
     await expect(wrap).toHaveAttribute('aria-pressed', 'false');
     await expect.poll(() => scroller.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(100);
@@ -1310,7 +1330,7 @@ test('有序列表正文起点显示拼音、保留光标，编辑列表标题�
     expect(lefts[2]).toBeGreaterThan(lefts[1]);
     await page.evaluate(raw => (window as any).__editor.active().replace(raw), raw);
     expect(await content(page)).toBe(raw.replace('vscode', 'tianjiavscode'));
-    const savedContent = () => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content);
+    const savedContent = () => page.evaluate(async () => (await window.moye.bootstrap()).documents[0].content);
     expect(await savedContent()).toBe(raw);
     await cdp.send('Input.insertText', { text: '添加' });
     await expect.poll(savedContent).toBe(raw.replace('vscode', '添加vscode'));
@@ -1432,7 +1452,7 @@ test('有序列表的隐藏编号不能成为选区，正文、跨行和源码�
     await page.keyboard.press('Shift+ArrowLeft');
     await cdp.send('Input.imeSetComposition', { text: 'pin', selectionStart: 3, selectionEnd: 3 });
     await cdp.send('Input.insertText', { text: '拼' });
-    await expect.poll(async () => page.evaluate(async () => (await window.rypota.bootstrap()).documents[0].content)).toBe(raw.replace('vscode', '拼vscode'));
+    await expect.poll(async () => page.evaluate(async () => (await window.moye.bootstrap()).documents[0].content)).toBe(raw.replace('vscode', '拼vscode'));
     await page.keyboard.press('Control+z');
     expect(await content(page)).toBe(raw);
 
@@ -1612,7 +1632,7 @@ test('关闭草稿和强制结束后的恢复', async () => {
 });
 
 test('文件树、相对图片、HTML 和 PDF 导出', async () => {
-  const { application, page, directory } = await launch(); const folder = path.join(directory, '笔记'); await fs.mkdir(folder); const file = path.join(folder, '示例.md'); await fs.writeFile(file, '# 导出测试\n\n![本地图片](image.png)\n\n正文 **加粗**。\n'); await fs.copyFile(path.join(root, 'assets/rypota.png'), path.join(folder, 'image.png'));
+  const { application, page, directory } = await launch(); const folder = path.join(directory, '笔记'); await fs.mkdir(folder); const file = path.join(folder, '示例.md'); await fs.writeFile(file, '# 导出测试\n\n![本地图片](image.png)\n\n正文 **加粗**。\n'); await fs.copyFile(path.join(root, 'assets/moye.png'), path.join(folder, 'image.png'));
   try {
     await application.evaluate(({ app }) => { (globalThis as any).__imagePrintWindows = 0; app.on('browser-window-created', () => { (globalThis as any).__imagePrintWindows++; }); });
     await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder); await execute(page, 'folder'); await page.locator('#sidebar-content').getByRole('button', { name: '示例.md' }).click(); await expect(current(page).locator('.md-h1')).toContainText('导出测试');
@@ -1620,7 +1640,8 @@ test('文件树、相对图片、HTML 和 PDF 导出', async () => {
     const html = path.join(directory, '导出.html'); await chooseSave(application, html); await execute(page, 'export-html'); await expect.poll(() => fs.readFile(html, 'utf8').catch(() => '')).toContain('<strong>加粗</strong>'); expect(await fs.readFile(html, 'utf8')).toContain('data:image/png;base64,');
     const pdf = path.join(directory, '导出.pdf'); await chooseSave(application, pdf); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 }); await page.locator('#print-save').click(); await expect.poll(() => fs.readFile(pdf).then(bytes => bytes.subarray(0, 4).toString()).catch(() => '')).toBe('%PDF');
     const created = await application.evaluate(() => (globalThis as any).__imagePrintWindows), previous = await fs.readFile(pdf);
-    await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(folder, 'image.png')); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    const replacement = await application.evaluate(({ nativeImage }, icon) => [...nativeImage.createFromPath(icon).resize({ width: 16 }).toPNG()], path.join(root, 'assets/moye.png'));
+    await fs.writeFile(path.join(folder, 'image.png'), Buffer.from(replacement)); await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
     expect(await application.evaluate(() => (globalThis as any).__imagePrintWindows)).toBe(created + 1);
     await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible(); expect(previous.equals(await fs.readFile(pdf))).toBe(false);
   } finally { await application.close(); }
@@ -1674,7 +1695,7 @@ test('目录随标题更新、脚注、YAML 元数据和 Mermaid 预览', async 
 });
 
 test('外部文件实时更新和文档目录内的相对图片路径', async () => {
-  const { application, page, directory } = await launch(); const child = path.join(directory, '子目录'); await fs.mkdir(child); await fs.copyFile(path.join(root, 'assets/replica.png'), path.join(child, '图片.png')); const file = path.join(directory, '笔记.md'); await fs.writeFile(file, '# 初始内容\n\n![图片](子目录/图片.png)\n');
+  const { application, page, directory } = await launch(); const child = path.join(directory, '子目录'); await fs.mkdir(child); await fs.copyFile(path.join(root, 'assets/moye.png'), path.join(child, '图片.png')); const file = path.join(directory, '笔记.md'); await fs.writeFile(file, '# 初始内容\n\n![图片](子目录/图片.png)\n');
   try {
     await application.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, file); await execute(page, 'open'); await expect(current(page).locator('.md-h1')).toHaveText('初始内容');
     await expect.poll(() => current(page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
@@ -1768,7 +1789,7 @@ test('鼠标左右拖动标签保持当前编辑和撤销，重启恢复排序',
     await expect.poll(() => page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id))).toEqual([ids[2], ids[1], ids[0]]);
     const held = (await page.locator('.tab.active').elementHandle())!; const transfer = await page.evaluateHandle(() => new DataTransfer());
     await held.dispatchEvent('dragstart', { dataTransfer: transfer });
-    await app.application.evaluate(async (_electron, file) => { const state = (globalThis as any).__replicaTest; await state.store.save(state.store.view([...state.windows.keys()][0]).activeId, file); }, path.join(app.directory, '拖动期间保存.md'));
+    await app.application.evaluate(async (_electron, file) => { const state = (globalThis as any).__moyeTest; await state.store.save(state.store.view([...state.windows.keys()][0]).activeId, file); }, path.join(app.directory, '拖动期间保存.md'));
     await expect(page).toHaveTitle(/拖动期间保存\.md/); expect(await held.evaluate(element => element.isConnected)).toBe(true);
     await held.dispatchEvent('dragend', { dataTransfer: transfer }); await expect(page.locator('.tab.active')).toContainText('拖动期间保存.md');
     await page.evaluate(() => (window as any).__editor.active().focus()); await page.keyboard.press('Control+End'); await page.keyboard.insertText('继续编辑'); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('第三个文档');
@@ -1781,8 +1802,8 @@ test('任务栏重新启动和普通再次启动均创建新的独立空白窗�
   const { application, page, profile } = await launch();
   try {
     await setContent(page, '原窗口中不能丢失的草稿');
-    const command = await application.evaluate(() => (globalThis as any).__replicaTest.relaunchCommand()); expect(command).toContain('--new-window'); expect(command).toContain('"');
-    const env: NodeJS.ProcessEnv = { ...process.env, TYPORA_REPLICA_USER_DATA: profile, TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+    const command = await application.evaluate(() => (globalThis as any).__moyeTest.relaunchCommand()); expect(command).toContain('--new-window'); expect(command).toContain('"');
+    const env: NodeJS.ProcessEnv = { ...process.env, MOYE_USER_DATA: profile, MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
     for (const flag of [['--new-window'], []]) {
       const count = application.windows().length;
       await promisify(execFile)(electronPath as unknown as string, ['.', ...flag], { cwd: root, env, windowsHide: true, timeout: 15000 });
@@ -1815,7 +1836,7 @@ test('跟随 VS Code 设置实时更新颜色，重启后继续同步且保留�
   const directory = await testDirectory(); const themes = path.join(directory, 'extensions/theme-defaults/themes'); await fs.mkdir(themes, { recursive: true });
   await fs.writeFile(path.join(themes, 'dark_modern.json'), JSON.stringify({ colors: { 'editor.background': '#121314' }, tokenColors: [{ scope: 'comment', settings: { foreground: '#123456' } }] }));
   const settings = path.join(directory, 'settings.json'); await fs.writeFile(settings, '{ // test user settings\n "workbench.colorTheme": "Default Dark Modern", }');
-  const env = { TYPORA_REPLICA_VSCODE_ROOT: directory, TYPORA_REPLICA_VSCODE_SETTINGS: settings }; let app = await launch(undefined, env);
+  const env = { MOYE_VSCODE_ROOT: directory, MOYE_VSCODE_SETTINGS: settings }; let app = await launch(undefined, env);
   try {
     await setContent(app.page, '同步测试\n\n```cpp\n// 注释\nint n = 42;\n```\n'); await execute(app.page, 'code-vscode');
     const block = current(app.page).locator('.md-code'); await expect(block).toHaveCSS('background-color', 'rgb(18, 19, 20)'); await expect(block.locator('.cm-line span').filter({ hasText: /^\/\/ 注释$/ })).toHaveCSS('color', 'rgb(18, 52, 86)');
@@ -1841,7 +1862,7 @@ test('标签可放到右侧空白和新建按钮区域，移出标签栏取消�
     await expect.poll(order).toEqual([ids[2], ids[0], ids[1]]); await expect(page.locator('.tab')).toHaveCount(3);
     await page.locator(`.tab[data-id="${ids[0]}"]`).dragTo(page.locator('#editor-stage'), { targetPosition: { x: 8, y: 20 } });
     expect(await order()).toEqual([ids[2], ids[0], ids[1]]); await expect(page.locator('.tab.dragging,.tab.drop-before,.tab.drop-after')).toHaveCount(0);
-    const untrusted = await page.evaluateHandle(id => { const data = new DataTransfer(); data.setData('application/x-replica-tab', id); return data; }, ids[0]); await strip.dispatchEvent('drop', { dataTransfer: untrusted }); expect(await order()).toEqual([ids[2], ids[0], ids[1]]);
+    const untrusted = await page.evaluateHandle(id => { const data = new DataTransfer(); data.setData('application/x-moye-tab', id); return data; }, ids[0]); await strip.dispatchEvent('drop', { dataTransfer: untrusted }); expect(await order()).toEqual([ids[2], ids[0], ids[1]]);
     await app.application.close(); app = await launch(app.profile);
     expect(await app.page.locator('.tab').evaluateAll(tabs => tabs.map(tab => (tab as HTMLElement).dataset.id))).toEqual([ids[2], ids[0], ids[1]]); expect(await content(app.page)).toBe('正在编辑的第三份');
   } finally { await app.application.close(); }
@@ -1876,7 +1897,7 @@ test('溢出标签栏可用鼠标滚轮和横向滚动翻看，保留选中项�
     expect(await active.evaluate(tab => tab.getBoundingClientRect().left >= tab.parentElement!.getBoundingClientRect().right)).toBe(true);
     expect(await add.boundingBox()).toEqual(addBox);
 
-    await page.evaluate(id => window.rypota.renameDocument({ id }, '更新中的当前标签'), selected);
+    await page.evaluate(id => window.moye.renameDocument({ id }, '更新中的当前标签'), selected);
     await expect(active).toHaveAccessibleName('更新中的当前标签');
     expect(await position()).toBe(0);
 
@@ -1986,13 +2007,14 @@ test('旧版用户数据迁移后恢复草稿、图片和设置', async () => {
   const appData = await testDirectory();
   const legacy = path.join(appData, 'Typora Replica');
   const target = path.join(appData, 'Moye');
-  const png = await fs.readFile(path.join(root, 'assets/replica.png'));
+  const png = await fs.readFile(path.join(root, 'assets/moye.png'));
   const old = await launch(legacy);
   const media = await old.application.evaluate((_electron, bytes) =>
-    (globalThis as any).__replicaTest.store.images.put(Buffer.from(bytes), '旧草稿图片.png') as Promise<string>, [...png]);
-  const source = `# 未保存的笔记\n\n![保留的图片](${media})`;
+    (globalThis as any).__moyeTest.store.images.put(Buffer.from(bytes), '旧草稿图片.png') as Promise<string>, [...png]);
+  expect(media).toMatch(/^moye-media:\/\/draft\//);
+  const source = `# 未保存的笔记\n\n![保留的图片](${media.replace(/^moye-media:/, 'replica-media:')})`;
   await setContent(old.page, source);
-  await old.page.evaluate(() => window.rypota.updatePreferences({ theme: 'dark', fontSize: 20, autoSave: false }));
+  await old.page.evaluate(() => window.moye.updatePreferences({ theme: 'dark', fontSize: 20, autoSave: false }));
   await old.application.close();
 
   const backup = path.join('recovery', 'workspace.json.bak');
@@ -2012,14 +2034,16 @@ test('旧版用户数据迁移后恢复草稿、图片和设置', async () => {
   await fs.writeFile(path.join(legacy, 'portable-update-result'), 'installed');
   await fs.writeFile(path.join(legacy, 'unrelated-cache'), '不属于恢复数据');
 
-  const environment = { TYPORA_REPLICA_USER_DATA: undefined, TYPORA_REPLICA_TEST_APP_DATA: appData };
+  const environment = { MOYE_USER_DATA: undefined, MOYE_TEST_APP_DATA: appData };
   const migrated = await launch(undefined, environment);
   expect(await migrated.application.evaluate(({ app }) => [app.getPath('userData'), app.getPath('sessionData')])).toEqual([target, target]);
   await expect.poll(() => content(migrated.page)).toBe(source);
-  await expect.poll(() => current(migrated.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-  const preferences = await migrated.page.evaluate(async () => (await window.rypota.bootstrap()).preferences);
+  const migratedImage = current(migrated.page).locator('.md-image img');
+  await expect(migratedImage).toHaveAttribute('src', media);
+  await expect.poll(() => migratedImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  const preferences = await migrated.page.evaluate(async () => (await window.moye.bootstrap()).preferences);
   expect(preferences).toMatchObject({ theme: 'dark', fontSize: 20, autoSave: false });
-  const update = await migrated.page.evaluate(() => window.rypota.portableUpdate('status'));
+  const update = await migrated.page.evaluate(() => window.moye.portableUpdate('status'));
   expect(update).toMatchObject({ phase: 'current', message: expect.stringContaining('已更新到') });
   expect(await fs.readFile(path.join(target, snapshot))).toEqual(oldSnapshot);
   expect(await fs.readFile(path.join(target, backup))).toEqual(oldBackup);
@@ -2052,10 +2076,10 @@ test('中文整理快捷键可局部操作和单步撤销，保存整理为可�
     await page.evaluate(() => { const e = (window as any).__editor.active(); const from = e.content.indexOf('中间'); e.view.dispatch({ selection: { anchor: from, head: from + 5 } }); e.focus(); });
     await page.keyboard.press('Alt+Shift+f'); expect(await content(page)).toBe('前文API\n\n中间 API\n\n后文API');
     await execute(page, 'preferences'); await expect(page.locator('#format-save-toggle')).not.toBeChecked(); await page.locator('#format-save-toggle').check(); await page.locator('#autosave-toggle').uncheck(); await page.locator('#settings-close').click();
-    await expect.poll(() => page.evaluate(async () => (await window.rypota.bootstrap()).preferences.autoSave)).toBe(false);
+    await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.autoSave)).toBe(false);
     const file = path.join(directory, '中文整理.md'); await chooseSave(application, file); await execute(page, 'save'); await expect.poll(() => fs.readFile(file, 'utf8').catch(() => '')).toBe('前文 API\n\n中间 API\n\n后文 API'); await expect.poll(() => content(page)).toBe('前文 API\n\n中间 API\n\n后文 API');
     await page.evaluate(() => (window as any).__editor.active().focus()); await page.keyboard.press('Control+z'); expect(await content(page)).toBe('前文API\n\n中间 API\n\n后文API');
-    await page.evaluate(() => (window as any).rypota.updatePreferences({ autoSave: true })); await setContent(page, '自动保存API与20GB。'); await expect.poll(() => fs.readFile(file, 'utf8')).toBe('自动保存 API 与 20 GB。'); await expect.poll(() => content(page)).toBe('自动保存 API 与 20 GB。');
+    await page.evaluate(() => (window as any).moye.updatePreferences({ autoSave: true })); await setContent(page, '自动保存API与20GB。'); await expect.poll(() => fs.readFile(file, 'utf8')).toBe('自动保存 API 与 20 GB。'); await expect.poll(() => content(page)).toBe('自动保存 API 与 20 GB。');
     await setContent(page, '| 标题 |\n| --- |\n| 中文API |\n'); const field = current(page).locator('td'); await field.click();
     await page.evaluate(() => { const cell = document.querySelector('td[contenteditable=true]')!; const range = document.createRange(); range.selectNodeContents(cell); range.collapse(false); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); });
     await page.keyboard.insertText('与20GB'); await expect.poll(() => fs.readFile(file, 'utf8')).toContain('中文 API 与 20 GB'); await expect(field).toBeFocused(); await expect(field).toHaveText('中文 API 与 20 GB'); await page.keyboard.press('Enter'); expect(await content(page)).toContain('中文 API 与 20 GB');
@@ -2063,35 +2087,35 @@ test('中文整理快捷键可局部操作和单步撤销，保存整理为可�
 });
 
 test('粘贴图片不会混入编码文本，草稿和保存后的附件均能恢复', async () => {
-  let app = await launch(); const bytes = await fs.readFile(path.join(root, 'assets/replica.png'));
+  let app = await launch(); const bytes = await fs.readFile(path.join(root, 'assets/moye.png'));
   try {
     await current(app.page).locator('.markdown-editor > .cm-scroller > .cm-content').click();
     await app.page.evaluate(({ bytes, encoded }) => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], '粘贴图片.png', { type: 'image/png' })); data.setData('text/plain', '不应插入的编码' + encoded); data.setData('text/html', `<img src="data:image/png;base64,${encoded}">`); document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); }, { bytes: [...bytes], encoded: bytes.toString('base64') });
     await expect(current(app.page).locator('.md-image img')).toHaveCount(1); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-    const source = await content(app.page); expect(source.length).toBeLessThan(300); expect(source).toContain('replica-media://draft/'); expect(source).not.toContain('base64'); expect(source).not.toContain('不应插入'); await expect(app.page.locator('#word-count')).toHaveText('0 字');
+    const source = await content(app.page); expect(source.length).toBeLessThan(300); expect(source).toContain('moye-media://draft/'); expect(source).not.toContain('base64'); expect(source).not.toContain('不应插入'); await expect(app.page.locator('#word-count')).toHaveText('0 字');
     const exported = path.join(app.directory, '未命名图片导出.html'); await chooseSave(app.application, exported); await execute(app.page, 'export-html'); await expect.poll(() => fs.readFile(exported, 'utf8').catch(() => '')).toContain(`src="data:image/png;base64,${bytes.toString('base64')}"`);
     await app.application.close(); app = await launch(app.profile); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const file = path.join(app.directory, '图片 笔记.md'); await chooseSave(app.application, file); await execute(app.page, 'save'); await expect.poll(() => fs.readFile(file, 'utf8').catch(() => '')).toContain('图片%20笔记.assets/');
-    const saved = await fs.readFile(file, 'utf8'); expect(saved).not.toContain('replica-media:'); expect(saved).not.toContain('base64'); const relative = /!\[[^\]]*\]\(([^)]+)\)/.exec(saved)![1]; expect(await fs.readFile(path.resolve(path.dirname(file), decodeURIComponent(relative)))).toEqual(bytes);
+    const saved = await fs.readFile(file, 'utf8'); expect(saved).not.toContain('moye-media:'); expect(saved).not.toContain('base64'); const relative = /!\[[^\]]*\]\(([^)]+)\)/.exec(saved)![1]; expect(await fs.readFile(path.resolve(path.dirname(file), decodeURIComponent(relative)))).toEqual(bytes);
     await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0); await expect(app.page.locator('#word-count')).toHaveText('0 字');
   } finally { await app.application.close(); }
 });
 
 test('粘贴图片后立即退出也会等待附件写入并恢复', async () => {
-  let app = await launch(); const bytes = [...await fs.readFile(path.join(root, 'assets/replica.png'))];
+  let app = await launch(); const bytes = [...await fs.readFile(path.join(root, 'assets/moye.png'))];
   try {
-    await app.application.evaluate(() => { const images = (globalThis as any).__replicaTest.store.images; const put = images.put.bind(images); images.put = async (...args: any[]) => { await new Promise(resolve => setTimeout(resolve, 150)); return put(...args); }; });
+    await app.application.evaluate(() => { const images = (globalThis as any).__moyeTest.store.images; const put = images.put.bind(images); images.put = async (...args: any[]) => { await new Promise(resolve => setTimeout(resolve, 150)); return put(...args); }; });
     await current(app.page).locator('.markdown-editor > .cm-scroller > .cm-content').click();
     await app.page.evaluate(bytes => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], 'image.png', { type: 'image/png' })); document.activeElement!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); }, bytes);
-    await app.application.close(); app = await launch(app.profile); expect(await content(app.page)).toContain('replica-media://draft/'); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+    await app.application.close(); app = await launch(app.profile); expect(await content(app.page)).toContain('moye-media://draft/'); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   } finally { await app.application.close(); }
 });
 
 test('旧版内嵌图片可整理为附件，编码不计字数且恢复后仍可显示', async () => {
-  let app = await launch(); const encoded = (await fs.readFile(path.join(root, 'assets/replica.png'))).toString('base64');
+  let app = await launch(); const encoded = (await fs.readFile(path.join(root, 'assets/moye.png'))).toString('base64');
   try {
     await setContent(app.page, `图片说明\n\n![旧图](data:image/png;base64,${encoded})\n`); await expect(app.page.locator('#word-count')).toHaveText('4 字'); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-    await execute(app.page, 'organize-images'); await expect.poll(() => content(app.page)).not.toContain('base64'); expect(await content(app.page)).toContain('replica-media://draft/');
+    await execute(app.page, 'organize-images'); await expect.poll(() => content(app.page)).not.toContain('base64'); expect(await content(app.page)).toContain('moye-media://draft/');
     await setContent(app.page, `图片说明\n\n![旧图](data:image/png;base64,${encoded})\n`); await app.application.close(); app = await launch(app.profile); expect(await content(app.page)).not.toContain('base64'); await expect(app.page.locator('#word-count')).toHaveText('4 字'); await expect.poll(() => current(app.page).locator('.md-image img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   } finally { await app.application.close(); }
 });

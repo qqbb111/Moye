@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const directory = path.resolve('.test-data', `quote-ime-${randomUUID()}`); await fs.mkdir(directory, { recursive: true });
-const env = { ...process.env, TYPORA_REPLICA_USER_DATA: path.join(directory, 'profile'), TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env, MOYE_USER_DATA: path.join(directory, 'profile'), MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
 const application = await electron.launch({ executablePath: electronPath, args: ['.'], env });
 try {
   const page = await application.firstWindow(); await page.locator('.markdown-editor').waitFor(); const cdp = await page.context().newCDPSession(page);

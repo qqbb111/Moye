@@ -11,6 +11,7 @@ import './themes/transparent.css';
 import { icon, type IconName } from './icons';
 import logo from '../assets/moye.svg?url';
 import { APP_NAME, APP_SHORT_NAME, isTheme, THEMES } from '../shared/branding';
+import { draftImageName } from '../shared/media-url';
 import { markdownStatistics, toggleMarkup, applyEdits } from '../shared/markdown-tools';
 import { CODE_THEME_OPTIONS, MODERN_DARK } from '../shared/code-theme';
 import { EditorView } from '@codemirror/view';
@@ -22,7 +23,7 @@ import { selectLine } from '@codemirror/commands';
 import { headings, type MarkdownNode } from './markdown';
 import type { WorkspaceView, WorkspaceUpdate, WorkspaceDocumentUpdate, DocumentView, ActionResult, FolderEntry, FolderView, DocumentReference, SaveMode } from '../shared/types';
 
-const bridge = window.rypota;
+const bridge = window.moye;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const app = $('#app');
 app.innerHTML = `<header class="titlebar"><span class="app-mark" title="${APP_NAME}"><img class="app-logo" src="${logo}" alt=""><span class="brand-name">${APP_SHORT_NAME}</span></span><nav class="menubar" aria-label="应用操作">${['文件', '编辑', '主题'].map(label => `<button type="button" data-toolbar-menu="${label}" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">${label}</button>`).join('')}<button id="settings-open" data-command="preferences" title="设置" aria-label="设置">${icon('settings-gear')}<span>设置</span></button></nav><div class="window-controls"><button data-control="minimize" aria-label="最小化" title="最小化">${icon('chrome-minimize')}</button><button data-control="maximize" aria-label="最大化" title="最大化">${icon('chrome-maximize')}</button><button data-control="close" aria-label="关闭窗口" title="关闭窗口">${icon('chrome-close')}</button></div></header>
@@ -71,11 +72,12 @@ function flushAll() {
   for (const [id, slot] of slots) changed(id, slot.editor.content);
 }
 function media(id: string, url: string) {
-  if (/^replica-media:\/\/draft\/[a-f0-9]{64}\.[a-z]+$/i.test(url)) return url;
+  const draft = draftImageName(url);
+  if (draft) return `moye-media://draft/${draft}`;
   if (/^(https?:|data:image\/|blob:)/i.test(url)) return url;
   if (/^[a-z]+:/i.test(url) && !/^[a-z]:[\\/]/i.test(url)) return '';
   let decoded = url; try { decoded = decodeURIComponent(url); } catch { /* Literal percent signs in legacy paths stay readable. */ }
-  return `replica-media://document/${id}/${encodeURIComponent(decoded.replaceAll('\\', '/'))}`;
+  return `moye-media://document/${id}/${encodeURIComponent(decoded.replaceAll('\\', '/'))}`;
 }
 function link(url: string) {
   if (url.startsWith('#')) { const editor = activeEditor(); if (!editor) return; const heading = currentOutline().find(item => item.slug === decodeURIComponent(url.slice(1))); if (heading) { editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); } return; }
@@ -189,7 +191,7 @@ $('#tabbar').ondragleave = event => {
 };
 $('#tabbar').ondrop = event => {
   if (!draggedTab) return; event.preventDefault(); event.stopPropagation();
-  const moved = draggedTab; const before = markTabDrop(event.clientX); const valid = event.dataTransfer?.getData('application/x-replica-tab') === moved;
+  const moved = draggedTab; const before = markTabDrop(event.clientX); const valid = event.dataTransfer?.getData('application/x-moye-tab') === moved;
   endTabDrag(); if (!valid || !workspace.documents.some(doc => doc.id === moved)) return;
   moveTab(moved, before);
 };
@@ -212,7 +214,7 @@ function renderTabs() {
     const tab = document.createElement('div'); tab.className = `tab ${item.id === workspace.activeId ? 'active' : ''}`; tab.role = 'tab'; tab.dataset.id = item.id; tab.id = `document-tab-${item.id}`; tab.setAttribute('aria-controls', `document-panel-${item.id}`); tab.setAttribute('aria-label', item.title); tab.setAttribute('aria-selected', String(item.id === workspace.activeId)); tab.tabIndex = item.id === workspace.activeId ? 0 : -1; tab.title = item.path ?? '本地草稿'; tab.draggable = false;
     const label = document.createElement('span'); label.className = 'tab-label'; label.textContent = item.title + (item.dirty && item.path ? ' ●' : ''); const close = document.createElement('button'); close.className = 'tab-close'; close.tabIndex = item.id === workspace.activeId ? 0 : -1; close.innerHTML = icon('close'); close.draggable = false; close.title = `关闭 ${item.title}`; close.setAttribute('aria-label', `关闭 ${item.title}`); close.onclick = event => { event.stopPropagation(); flushAll(); void run(() => bridge.closeDocument(item.id)); };
     let skipClick = false;
-    tab.innerHTML = icon('markdown').replace('class="replica-icon"', 'class="replica-icon tab-file-icon"'); tab.append(label, close);
+    tab.innerHTML = icon('markdown').replace('class="moye-icon"', 'class="moye-icon tab-file-icon"'); tab.append(label, close);
     tab.onclick = () => {
       if (skipClick) { skipClick = false; return; }
       if (workspace.activeId === item.id) { activeEditor()?.focus(); return; }
@@ -259,7 +261,7 @@ function renderTabs() {
       window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', finish, true); window.addEventListener('pointercancel', finish, true);
       tab.onlostpointercapture = () => finish(); cancelTabPointer = () => finish();
     };
-    tab.ondragstart = event => { if (!event.dataTransfer || (event.target as HTMLElement).closest('.tab-close')) { event.preventDefault(); return; } draggedTab = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-replica-tab', item.id); const box = tab.getBoundingClientRect(); floatTab(tab, event.clientX || box.left + box.width / 2, event.clientY || box.top + box.height / 2); };
+    tab.ondragstart = event => { if (!event.dataTransfer || (event.target as HTMLElement).closest('.tab-close')) { event.preventDefault(); return; } draggedTab = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-moye-tab', item.id); const box = tab.getBoundingClientRect(); floatTab(tab, event.clientX || box.left + box.width / 2, event.clientY || box.top + box.height / 2); };
     tab.ondragend = endTabDrag;
     tabStrip.append(tab);
   }
@@ -505,7 +507,7 @@ function renderTree(container: HTMLElement, entries: FolderEntry[], depth: numbe
       const branch = document.createElement('div'); branch.className = 'folder-branch';
       const details = document.createElement('details');
       const summary = document.createElement('summary');
-      summary.innerHTML = icon('chevron-right').replace('class="replica-icon"', 'class="replica-icon tree-chevron"') + icon('folder');
+      summary.innerHTML = icon('chevron-right').replace('class="moye-icon"', 'class="moye-icon tree-chevron"') + icon('folder');
       const label = document.createElement('span'); label.className = 'folder-label'; label.textContent = entry.name;
       summary.append(label); summary.style.paddingLeft = `${18 + depth * 14}px`;
       const children = document.createElement('div'); details.append(summary, children);
@@ -738,7 +740,7 @@ function beginRename(target: FileTarget, origin: HTMLElement) {
   const tab = origin.classList.contains('tab');
   if (tab) control.style.width = `${origin.getBoundingClientRect().width}px`;
   else control.style.paddingLeft = origin.style.paddingLeft;
-  const glyph = origin.querySelector('.replica-icon');
+  const glyph = origin.querySelector('.moye-icon');
   if (glyph) control.append(glyph.cloneNode(true));
   const input = document.createElement('input');
   input.className = 'inline-rename-input'; input.setAttribute('aria-label', '文件名');

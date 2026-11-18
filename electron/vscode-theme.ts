@@ -15,7 +15,7 @@ async function json(file: string): Promise<any> {
 }
 async function directories(root: string) { try { return (await fs.readdir(root, { withFileTypes: true })).filter(item => item.isDirectory()).map(item => path.join(root, item.name)); } catch { return []; } }
 async function appRoots() {
-  if (process.env.TYPORA_REPLICA_VSCODE_ROOT) return [path.resolve(process.env.TYPORA_REPLICA_VSCODE_ROOT)];
+  if (process.env.MOYE_VSCODE_ROOT) return [path.resolve(process.env.MOYE_VSCODE_ROOT)];
   const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData/Local');
   const installs = new Set([path.join(local, 'Programs/Microsoft VS Code'), path.join(local, 'Programs/Microsoft VS Code Insiders'), path.join(process.env.ProgramFiles ?? 'C:/Program Files', 'Microsoft VS Code')]);
   for (const entry of (process.env.PATH ?? '').split(path.delimiter)) if (/[/\\](?:Microsoft VS Code|VSCode)[/\\]bin$/i.test(entry)) installs.add(path.dirname(entry));
@@ -30,7 +30,7 @@ async function appRoots() {
   return [...new Set(result)];
 }
 async function settingsPath() {
-  if (process.env.TYPORA_REPLICA_VSCODE_SETTINGS) return path.resolve(process.env.TYPORA_REPLICA_VSCODE_SETTINGS);
+  if (process.env.MOYE_VSCODE_SETTINGS) return path.resolve(process.env.MOYE_VSCODE_SETTINGS);
   const roaming = process.env.APPDATA ?? path.join(os.homedir(), 'AppData/Roaming');
   for (const app of ['Code', 'Code - Insiders']) { const file = path.join(roaming, app, 'User/settings.json'); if (await exists(file)) return file; }
   return null;
@@ -41,7 +41,7 @@ async function locateTheme(name: string): Promise<{ file: string; light: boolean
     const file = path.join(root, 'extensions/theme-defaults/themes/dark_modern.json'); if (await exists(file)) return { file, light: false };
   }
   const extensionRoots = roots.map(root => path.join(root, 'extensions'));
-  extensionRoots.push(process.env.TYPORA_REPLICA_VSCODE_EXTENSIONS ?? path.join(os.homedir(), '.vscode/extensions'));
+  extensionRoots.push(process.env.MOYE_VSCODE_EXTENSIONS ?? path.join(os.homedir(), '.vscode/extensions'));
   for (const root of extensionRoots) for (const directory of await directories(root)) {
     try {
       const metadata = await json(path.join(directory, 'package.json')); const themes = metadata.contributes?.themes; if (!Array.isArray(themes)) continue;

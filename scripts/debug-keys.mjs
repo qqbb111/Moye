@@ -2,7 +2,7 @@ import { _electron as electron } from '@playwright/test';
 import executablePath from 'electron';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-const env = { ...process.env, TYPORA_REPLICA_USER_DATA: path.resolve('.test-data', randomUUID()), TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env, MOYE_USER_DATA: path.resolve('.test-data', randomUUID()), MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ executablePath, args: ['.'], env });
 const page = await app.firstWindow(); await page.locator('.markdown-editor').waitFor();
 page.on('pageerror', error => console.log('ERROR', error.message));

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DocumentStore, FileConflictError } from '../electron/store';
-async function setup() { const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rypota-store-')); const store = new DocumentStore(path.join(directory, 'recovery'), { autoSave: 35, recovery: 10 }); await store.initialize(); const windowId = store.newWindow(); return { directory, store, windowId }; }
+async function setup() { const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'moye-store-')); const store = new DocumentStore(path.join(directory, 'recovery'), { autoSave: 35, recovery: 10 }); await store.initialize(); const windowId = store.newWindow(); return { directory, store, windowId }; }
 
 test('打印偏好在重启后保留两套字号，文档和编辑主题保持原样', async () => {
   const { store, windowId } = await setup();
@@ -142,7 +142,7 @@ test('自动保存写回 UTF-8 文件并保留 BOM 和 CRLF，同时保存原文
 });
 test('外部修改不会被自动保存覆盖，本地草稿仍可恢复', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '冲突.md'); await fs.writeFile(file, '原文');
-  try { const { id } = await store.openFile(windowId, file); store.setPreferences({ autoSave: false }); store.update(windowId, id, 'Rypota 的修改', 1); await fs.writeFile(file, '其他程序的修改'); await assert.rejects(store.save(id), FileConflictError); await store.flush(); assert.equal(await fs.readFile(file, 'utf8'), '其他程序的修改'); const restored = new DocumentStore(store.directory); await restored.initialize(); try { assert.equal(restored.view(windowId).documents[0].content, 'Rypota 的修改'); assert.equal(restored.view(windowId).documents[0].status, 'conflict'); } finally { restored.dispose(); } } finally { store.dispose(); }
+  try { const { id } = await store.openFile(windowId, file); store.setPreferences({ autoSave: false }); store.update(windowId, id, '墨页的修改', 1); await fs.writeFile(file, '其他程序的修改'); await assert.rejects(store.save(id), FileConflictError); await store.flush(); assert.equal(await fs.readFile(file, 'utf8'), '其他程序的修改'); const restored = new DocumentStore(store.directory); await restored.initialize(); try { assert.equal(restored.view(windowId).documents[0].content, '墨页的修改'); assert.equal(restored.view(windowId).documents[0].status, 'conflict'); } finally { restored.dispose(); } } finally { store.dispose(); }
 });
 test('显式确认覆盖后保存成功，保存失败不会清除修改状态', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '文档.md'); await fs.writeFile(file, '旧');

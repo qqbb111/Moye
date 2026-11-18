@@ -15,7 +15,7 @@ after(async () => {
   }
 });
 async function setup() {
-  const directory = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'replica-images-'));
+  const directory = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'moye-images-'));
   directories.add(directory);
   const store = new DocumentStore(path.join(directory, 'recovery')); await store.initialize();
   const window = store.newWindow(); return { directory, store, window };
@@ -41,9 +41,11 @@ test('普通子目录图片和文档内的 Typora 根路径可读取', async () 
 test('草稿图片独立存储，保存后写出相对附件，另存为仍可携带图片', async () => {
   const { directory, store, window } = await setup();
   try {
-    const url = await store.images.put(png, '剪贴板.png'); assert.match(url, /^replica-media:\/\/draft\//); assert.deepEqual((await store.images.readDraft(url))?.bytes, png);
-    const id = store.newDocument(window, `正文\n\n![图片](${url})\n`); const first = path.join(directory, '中文 笔记.md'); await store.save(id, first);
-    const saved = await fs.readFile(first, 'utf8'); assert.ok(!saved.includes('replica-media:')); assert.ok(!saved.includes('base64,')); assert.ok(saved.includes('中文%20笔记.assets/'));
+    const url = await store.images.put(png, '剪贴板.png'); assert.match(url, /^moye-media:\/\/draft\//); assert.deepEqual((await store.images.readDraft(url))?.bytes, png);
+    const legacyUrl = url.replace(/^moye-media:/, 'replica-media:');
+    assert.deepEqual((await store.images.readDraft(legacyUrl))?.bytes, png);
+    const id = store.newDocument(window, `正文\n\n![图片](${legacyUrl})\n\n![新图片](${url})\n`); const first = path.join(directory, '中文 笔记.md'); await store.save(id, first);
+    const saved = await fs.readFile(first, 'utf8'); assert.doesNotMatch(saved, /(?:moye|replica)-media:|base64,/); assert.ok(saved.includes('中文%20笔记.assets/'));
     const relative = /!\[图片\]\(([^)]+)\)/.exec(saved)![1]; assert.deepEqual(await fs.readFile(path.resolve(directory, decodeURIComponent(relative))), png);
     const other = path.join(directory, '其他目录'); await fs.mkdir(other); const second = path.join(other, '新笔记.md'); await store.save(id, second, true);
     const copied = /!\[图片\]\(([^)]+)\)/.exec(await fs.readFile(second, 'utf8'))![1]; assert.deepEqual(await fs.readFile(path.resolve(other, decodeURIComponent(copied))), png);
@@ -53,7 +55,7 @@ test('旧版 Base64 草稿恢复时转换为附件，保留代码块中的图片
   const { directory, store, window } = await setup(); const embedded = `data:image/png;base64,${png.toString('base64')}`;
   const id = store.newDocument(window, `![图](${embedded})\n\n\`\`\`md\n![代码示例](${embedded})\n\`\`\``); await store.persist(); store.dispose();
   const restored = new DocumentStore(path.join(directory, 'recovery')); await restored.initialize();
-  try { const source = restored.documents.get(id)!.content; assert.match(source, /^!\[图\]\(replica-media:\/\/draft\//); assert.ok(source.includes(`![代码示例](${embedded})`)); const url = /^!\[图\]\(([^)]+)\)/.exec(source)![1]; assert.deepEqual((await restored.images.readDraft(url))?.bytes, png); } finally { restored.dispose(); }
+  try { const source = restored.documents.get(id)!.content; assert.match(source, /^!\[图\]\(moye-media:\/\/draft\//); assert.ok(source.includes(`![代码示例](${embedded})`)); const url = /^!\[图\]\(([^)]+)\)/.exec(source)![1]; assert.deepEqual((await restored.images.readDraft(url))?.bytes, png); } finally { restored.dispose(); }
 });
 test('保存整理默认关闭，开启后遵循相同规则并保留代码和原文件备份', async () => {
   const { directory, store, window } = await setup();

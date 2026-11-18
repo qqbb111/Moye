@@ -91,7 +91,7 @@ export async function printHTML(source: string, title: string, host: Host, optio
   for (const table of article.querySelectorAll('table:not(:has(thead))')) { const first = table.querySelector('tr'); if (first?.querySelector('th')) { const head = document.createElement('thead'); head.append(first); table.prepend(head); } }
   const safeTitle = document.createElement('title'); safeTitle.textContent = title;
   const geometry = printGeometry(options.layout), font = options.codeFontPt, maxHeight = geometry.heightMm - geometry.topMm - geometry.bottomMm;
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: replica-media:; font-src data:; style-src 'unsafe-inline'; script-src 'none'">${safeTitle.outerHTML}<style>
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: moye-media:; font-src data:; style-src 'unsafe-inline'; script-src 'none'">${safeTitle.outerHTML}<style>
 @font-face{font-family:'Source Code Pro';font-weight:400;src:url('${regular}') format('woff2')}
 @font-face{font-family:'Source Code Pro';font-weight:700;src:url('${bold}') format('woff2')}
 @font-face{font-family:'Source Code Pro';font-weight:400;font-style:italic;src:url('${italic}') format('woff2')}

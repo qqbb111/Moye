@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 
 const packaged = process.argv.includes('--packaged');
 const directory = path.resolve('.test-data', `writing-${randomUUID()}`); await fs.mkdir(directory, { recursive: true });
-const env = { ...process.env, TYPORA_REPLICA_USER_DATA: path.join(directory, 'profile'), TYPORA_REPLICA_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
-const application = await electron.launch({ executablePath: packaged ? path.resolve(process.env.TYPORA_REPLICA_PREVIEW_EXE ?? 'release/Typora Replica-win32-x64/Typora Replica.exe') : electronPath, args: packaged ? [] : ['.'], env });
+const env = { ...process.env, MOYE_USER_DATA: path.join(directory, 'profile'), MOYE_TEST: '1' }; delete env.ELECTRON_RUN_AS_NODE;
+const application = await electron.launch({ executablePath: packaged ? path.resolve(process.env.MOYE_PREVIEW_EXE ?? 'release/Moye-win32-x64/Moye.exe') : electronPath, args: packaged ? [] : ['.'], env });
 const page = await application.firstWindow(); const errors = []; page.on('pageerror', error => errors.push(error.message));
 try {
   await page.locator('.markdown-editor').waitFor(); const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1080, height: 850 }); window.showInactive(); });
@@ -23,11 +23,11 @@ try {
   const table = page.locator('table'); await expect(table.locator('th').first()).toBeFocused();
   const alignment = await table.evaluate(element => { const box = element.getBoundingClientRect(), parent = element.parentElement.getBoundingClientRect(); return Math.abs((box.left + box.right) / 2 - (parent.left + parent.right) / 2); }); expect(alignment).toBeLessThan(2);
   for (const [index, text] of ['功能', '状态', '中文整理', '已完成'].entries()) { await page.keyboard.insertText(text); if (index < 3) await page.keyboard.press('Tab'); } await page.keyboard.press('Enter');
-  const png = await fs.readFile('assets/replica.png');
+  const png = await fs.readFile('assets/moye.png');
   await page.evaluate(bytes => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], '图片.png', { type: 'image/png' })); document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); }, [...png]);
   await expect.poll(() => page.locator('.md-image img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
   const file = path.join(directory, '写作验证.md'); await application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, file); await page.evaluate(() => window.__editor.execute('save'));
-  const saved = await fs.readFile(file, 'utf8'); expect(saved).not.toContain('base64'); expect(saved).not.toContain('replica-media:'); expect(saved).toContain('写作验证.assets/'); expect(saved).toContain('// 中文API：代码保持原样');
+  const saved = await fs.readFile(file, 'utf8'); expect(saved).not.toContain('base64'); expect(saved).not.toContain('moye-media:'); expect(saved).toContain('写作验证.assets/'); expect(saved).toContain('// 中文API：代码保持原样');
   await expect.poll(() => page.locator('.md-image img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0);
   await page.evaluate(async () => { await document.fonts.ready; document.querySelector('.markdown-editor > .cm-scroller').scrollTop = 0; }); await page.mouse.move(5, 5); await page.screenshot({ path: path.join(directory, 'writing-preview.png') });
   expect(errors).toEqual([]); console.log(JSON.stringify({ packaged, writing: 'passed', imeEqualEvent: 'passed', tableCentered: alignment < 2, imageBytes: png.length, markdownCharacters: saved.length, errors }));

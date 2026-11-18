@@ -21,10 +21,10 @@ foreach ($iconSize in @(16,24,32,48,64,128,256)) {
   $graphics.DrawLines($pen,[System.Drawing.PointF[]]@([System.Drawing.PointF]::new(18,31),[System.Drawing.PointF]::new(18,21),[System.Drawing.PointF]::new(25,28),[System.Drawing.PointF]::new(32,21),[System.Drawing.PointF]::new(32,31)))
   $pngStream = [System.IO.MemoryStream]::new(); $bitmap.Save($pngStream,[System.Drawing.Imaging.ImageFormat]::Png)
   $iconImages += [pscustomobject]@{Size=$iconSize;Bytes=$pngStream.ToArray()}
-  if ($iconSize -eq 256) { $bitmap.Save((Join-Path $PSScriptRoot '../assets/replica.png'),[System.Drawing.Imaging.ImageFormat]::Png) }
+  if ($iconSize -eq 256) { $bitmap.Save((Join-Path $PSScriptRoot '../assets/moye.png'),[System.Drawing.Imaging.ImageFormat]::Png) }
   $pngStream.Dispose();$pen.Dispose();$round.Dispose();$jade.Dispose();$ink.Dispose();$fold.Dispose();$graphics.Dispose();$bitmap.Dispose()
 }
-$stream = [System.IO.File]::Create((Join-Path $PSScriptRoot '../assets/replica.ico')); $writer = [System.IO.BinaryWriter]::new($stream)
+$stream = [System.IO.File]::Create((Join-Path $PSScriptRoot '../assets/moye.ico')); $writer = [System.IO.BinaryWriter]::new($stream)
 $writer.Write([uint16]0);$writer.Write([uint16]1);$writer.Write([uint16]$iconImages.Count)
 $offset = 6+16*$iconImages.Count
 foreach ($iconImage in $iconImages) {

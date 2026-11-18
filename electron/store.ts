@@ -63,7 +63,7 @@ async function renameWithoutOverwrite(source: string, target: string) {
   }
 }
 export async function atomicWrite(target: string, contents: Buffer | string) {
-  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.rypota-${randomUUID()}.tmp`);
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.moye-${randomUUID()}.tmp`);
   let handle;
   try {
     handle = await fs.open(temporary, 'wx', 0o600);

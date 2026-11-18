@@ -228,7 +228,7 @@ class BlockWidget extends WidgetType {
     const toggleWrap = () => { setWrap(!wrapping); ctx.host.setCodeWrap?.(wrapping); return true; }; wrap.onclick = toggleWrap; paintWrap();
     const updateCount = (state: EditorState) => { count.textContent = `${state.doc.lines} 行`; };
     copy.onmousedown = event => event.preventDefault();
-    copy.onclick = () => { const editor = widgetEditors.get(root); void window.rypota.clipboard('write', editor?.state.doc.toString() ?? '').then(() => { clearTimeout(copyTimer); copy.innerHTML = checkIcon; copy.dataset.copied = 'true'; copy.title = '已复制'; copy.setAttribute('aria-label', '已复制'); copyTimer = setTimeout(() => { copy.innerHTML = copyIcon; delete copy.dataset.copied; copy.title = '复制代码'; copy.setAttribute('aria-label', '复制代码'); }, 1500); }).catch(() => { copy.title = '复制失败，请重试'; }); };
+    copy.onclick = () => { const editor = widgetEditors.get(root); void window.moye.clipboard('write', editor?.state.doc.toString() ?? '').then(() => { clearTimeout(copyTimer); copy.innerHTML = checkIcon; copy.dataset.copied = 'true'; copy.title = '已复制'; copy.setAttribute('aria-label', '已复制'); copyTimer = setTimeout(() => { copy.innerHTML = copyIcon; delete copy.dataset.copied; copy.title = '复制代码'; copy.setAttribute('aria-label', '复制代码'); }, 1500); }).catch(() => { copy.title = '复制失败，请重试'; }); };
     toolbar.append(language, count, wrap, copy); const content = document.createElement('div'); content.className = 'code-content'; root.append(toolbar, content);
     let applying = false;
     const commit = (value: string) => {

@@ -1,10 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { RypotaBridge } from '../shared/types';
+import type { MoyeBridge } from '../shared/types';
 const subscribe = (channel: string, listener: (...args: any[]) => void) => {
   const handler = (_event: unknown, ...args: any[]) => listener(...args);
   ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler);
 };
-const bridge: RypotaBridge = {
+const bridge: MoyeBridge = {
   bootstrap: () => ipcRenderer.invoke('workspace:bootstrap'),
   newDocument: () => ipcRenderer.invoke('document:new'),
   openDocuments: () => ipcRenderer.invoke('document:open'),
@@ -49,4 +49,4 @@ const bridge: RypotaBridge = {
   onCancelClose: listener => subscribe('window:cancel-close', listener),
   onMessage: listener => subscribe('app:message', listener),
 };
-contextBridge.exposeInMainWorld('rypota', bridge);
+contextBridge.exposeInMainWorld('moye', bridge);

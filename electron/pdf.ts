@@ -21,7 +21,7 @@ async function resolveImages(html: string, signal: AbortSignal) {
   const urls = new Set<string>();
   for (const [tag] of html.matchAll(imageTag)) for (const [, name, double, single] of tag.matchAll(attributes)) {
     const url = double ?? single;
-    if (name.toLowerCase() === 'src' && url && /^replica-media:/i.test(url)) urls.add(url);
+    if (name.toLowerCase() === 'src' && url && /^moye-media:/i.test(url)) urls.add(url);
   }
   const sources = [...urls];
   const embedded = new Map<string, string>();

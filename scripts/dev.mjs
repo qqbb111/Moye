@@ -7,7 +7,7 @@ await build({ entryPoints: ['electron/preload.ts'], outfile: 'dist-electron/prel
 const server = await createServer({ server: { host: '127.0.0.1', port: 5173, strictPort: false } });
 await server.listen();
 const address = server.httpServer.address();
-const env = { ...process.env, TYPORA_REPLICA_DEV_URL: `http://127.0.0.1:${address.port}` };
+const env = { ...process.env, MOYE_DEV_URL: `http://127.0.0.1:${address.port}` };
 delete env.ELECTRON_RUN_AS_NODE;
 const child = spawn(electron, ['.'], { stdio: 'inherit', env, windowsHide: true });
 child.on('exit', async (code) => { await server.close(); process.exit(code ?? 0); });

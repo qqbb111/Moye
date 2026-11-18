@@ -12,12 +12,12 @@ test('主题和用户自定义按通用 token 映射到代码配色', () => {
 });
 
 test('读取 JSONC 和继承主题，刷新用户设置，解析失败保留最近的有效配色', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'replica-theme-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'moye-theme-'));
   const settings = path.join(directory, 'settings.json'); const theme = path.join(directory, 'extensions/theme-defaults/themes'); await fs.mkdir(theme, { recursive: true });
   await fs.writeFile(path.join(theme, 'base.json'), JSON.stringify({ colors: { 'editor.background': '#222222' }, tokenColors: [{ scope: 'comment', settings: { foreground: '#123456' } }] }));
   await fs.writeFile(path.join(theme, 'dark_modern.json'), '{ // inherited\n "include": "./base.json", "tokenColors": [], }');
-  const previous = [process.env.TYPORA_REPLICA_VSCODE_ROOT, process.env.TYPORA_REPLICA_VSCODE_SETTINGS];
-  process.env.TYPORA_REPLICA_VSCODE_ROOT = directory; process.env.TYPORA_REPLICA_VSCODE_SETTINGS = settings;
+  const previous = [process.env.MOYE_VSCODE_ROOT, process.env.MOYE_VSCODE_SETTINGS];
+  process.env.MOYE_VSCODE_ROOT = directory; process.env.MOYE_VSCODE_SETTINGS = settings;
   let changes = 0; const sync = new VscodeThemeSync(() => changes++);
   try {
     await fs.writeFile(settings, '{ // user settings\n "workbench.colorTheme": "Default Dark Modern", }');
@@ -26,5 +26,5 @@ test('读取 JSONC 和继承主题，刷新用户设置，解析失败保留最�
     assert.equal((await sync.refresh()).palette.comment, '#abcdef');
     await fs.writeFile(settings, '{ incomplete'); const failed = await sync.refresh(); assert.equal(failed.palette.comment, '#abcdef'); assert.match(failed.message!, /自动重试/);
     await fs.writeFile(settings, JSON.stringify({ 'workbench.colorTheme': 'Missing' })); const missing = await sync.refresh(); assert.equal(missing.source, 'builtin'); assert.match(missing.message!, /未找到/); assert.equal(changes, 4);
-  } finally { sync.stop(); for (const [index, name] of ['TYPORA_REPLICA_VSCODE_ROOT', 'TYPORA_REPLICA_VSCODE_SETTINGS'].entries()) { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; } }
+  } finally { sync.stop(); for (const [index, name] of ['MOYE_VSCODE_ROOT', 'MOYE_VSCODE_SETTINGS'].entries()) { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; } }
 });

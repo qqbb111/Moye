@@ -48,7 +48,7 @@ export interface UpdateState {
   percent?: number;
   message?: string;
 }
-export interface RypotaBridge {
+export interface MoyeBridge {
   bootstrap(): Promise<WorkspaceView>;
   newDocument(): Promise<ActionResult>;
   openDocuments(): Promise<ActionResult>;
@@ -93,4 +93,4 @@ export interface RypotaBridge {
   onCancelClose(listener: () => void): () => void;
   onMessage(listener: (message: string) => void): () => void;
 }
-declare global { interface Window { rypota: RypotaBridge } }
+declare global { interface Window { moye: MoyeBridge } }

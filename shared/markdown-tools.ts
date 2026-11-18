@@ -16,7 +16,7 @@ const han = /\p{Script=Han}/u;
 const cjkLatinBoundary = (left: string, right: string) => (han.test(left) && /[A-Za-z0-9]/.test(right)) || (/[A-Za-z0-9%°]/.test(left) && han.test(right));
 export function tidyChineseText(text: string): string {
   // Addresses and paths are prose tokens too; their spelling must stay exact.
-  const protectedToken = /(?:https?:\/\/|replica-media:\/\/|data:image\/)[^\s<>]+|\b[A-Za-z]:[\\/][^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[\p{L}\p{N}_./\\-]+\.(?:md|txt|cpp|hpp|h|py|js|ts|tsx|json|ya?ml|html|css|png|jpe?g|svg)\b/gu;
+  const protectedToken = /(?:https?:\/\/|(?:moye|replica)-media:\/\/|data:image\/)[^\s<>]+|\b[A-Za-z]:[\\/][^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|[\p{L}\p{N}_./\\-]+\.(?:md|txt|cpp|hpp|h|py|js|ts|tsx|json|ya?ml|html|css|png|jpe?g|svg)\b/gu;
   const tidy = (value: string) => {
     value = value.replace(/[０-９]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
     value = value.replace(/(\p{Script=Han})([A-Za-z0-9])/gu, '$1 $2').replace(/([A-Za-z0-9%°])(\p{Script=Han})/gu, '$1 $2');

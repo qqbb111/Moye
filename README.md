@@ -48,7 +48,7 @@ npm start
 ```
 
 - `npm test` 跑单元测试，`npm run test:e2e` 跑桌面测试。
-- `npm run package` 生成源码开发用的本机便携版。仓库根目录的 `启动墨页.bat` 是开发用快捷脚本。
+- `npm run package` 生成本机便携版，入口为 `release/Moye-win32-x64/Moye.exe`。仓库根目录的 `启动墨页.bat` 是开发用快捷脚本。
 - `npm run package:zip` 生成 Windows x64 ZIP，`node scripts/smoke-release.mjs --targeted` 验证刚解压的便携包。
 
 [Windows CI](https://github.com/qqbb111/Moye/actions/workflows/windows-ci.yml) · [霞鹜文楷许可](assets/fonts/LICENSE-LXGWWenKai.txt) · [Source Code Pro 许可](assets/fonts/LICENSE-SourceCodePro.txt) · [第三方声明](THIRD_PARTY_NOTICES.txt)
