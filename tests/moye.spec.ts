@@ -967,11 +967,13 @@ test('侧栏与标签切换平滑，快速反向操作和减少动态效果仍�
   } finally { await application.close(); }
 });
 
-test('段落回车后的退格和 Delete 整体合并，保留 Shift+Enter 和源码换行语义', async () => {
+test('段落回车后的退格和 Delete 整体合并，保留 Shift+Enter 和源码换行语义', async ({}, testInfo) => {
   const { application, page } = await launch();
   const caret = (position: number) => page.evaluate(position => { const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor: position } }); editor.focus(); }, position);
   try {
-    for (const theme of ['workbuddy', 'dark']) {
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.show(); window.focus(); });
+    await page.evaluate(() => document.fonts.ready);
+    for (const theme of ['light', 'workbuddy', 'dark']) {
       await execute(page, theme); await setContent(page, '前文'); await caret(2);
       await page.keyboard.press('Enter'); expect(await content(page)).toBe('前文\n\n');
       await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文');
@@ -981,7 +983,33 @@ test('段落回车后的退格和 Delete 整体合并，保留 Shift+Enter 和�
       await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文后文');
       await setContent(page, '前文\n\n后文'); await caret(2); await page.keyboard.press('Delete'); expect(await content(page)).toBe('前文后文');
       await setContent(page, '前文'); await caret(2); await page.keyboard.press('Shift+Enter'); await page.keyboard.insertText('同行段落'); expect(await content(page)).toBe('前文  \n同行段落');
+      for (const raw of ['前文\n\n后文', '前文\n', '前文\n\n']) {
+        await setContent(page, raw); await caret(2);
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        const before = await page.evaluate(() => (window as any).__editor.active().view.coordsAtPos(2));
+        await page.keyboard.press('Enter'); await page.keyboard.press('Backspace');
+        expect(await content(page)).toBe(raw);
+        expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(2);
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        const after = await page.evaluate(() => (window as any).__editor.active().view.coordsAtPos(2));
+        expect(Math.abs(after.left - before.left)).toBeLessThan(1);
+        expect(Math.abs(after.top - before.top)).toBeLessThan(1);
+      }
     }
+    await setContent(page, '前文\n\n后文'); await caret(2); await page.keyboard.press('Enter');
+    const split = await content(page);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Control+z'); expect(await content(page)).toBe(split);
+    await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n\n后文');
+    await page.keyboard.press('Enter'); await page.keyboard.press('Control+z'); await page.keyboard.press('Control+Shift+z');
+    await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n\n后文');
+    await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+    await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n\n后文');
+    await execute(page, 'light'); await caret(2);
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+    await fs.writeFile(testInfo.outputPath('paragraph-restored.png'), Buffer.from(png, 'base64'));
     await setContent(page, '前文\n\n\n后文'); await caret(5); await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n\n后文');
     await execute(page, 'toggle-source'); await setContent(page, '前文\n\n后文'); await caret(4); await page.keyboard.press('Backspace'); expect(await content(page)).toBe('前文\n后文');
     await setContent(page, '前文'); await caret(2); await page.keyboard.press('Enter'); expect(await content(page)).toBe('前文\n');

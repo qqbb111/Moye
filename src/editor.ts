@@ -1,6 +1,6 @@
-import { EditorState, StateEffect, StateField, Prec, EditorSelection, Compartment, ChangeSet, type Extension } from '@codemirror/state';
+import { EditorState, StateEffect, StateField, Prec, EditorSelection, Compartment, ChangeSet, type ChangeDesc, type Extension } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, lineNumbers, type DecorationSet } from '@codemirror/view';
-import { history, historyKeymap, defaultKeymap, indentWithTab, undo, redo, selectLine, isolateHistory } from '@codemirror/commands';
+import { history, historyKeymap, defaultKeymap, indentWithTab, undo, redo, selectLine, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage, insertNewlineContinueMarkup, deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete';
 import { languages } from '@codemirror/language-data';
@@ -18,6 +18,28 @@ import { textEdits, toggleMarkup, tidyChineseMarkdown } from '../shared/markdown
 const sourceEffect = StateEffect.define<boolean>();
 const compositionEffect = StateEffect.define<boolean>();
 const compositionField = StateField.define({ create: () => false, update(value, transaction) { for (const effect of transaction.effects) if (effect.is(compositionEffect)) value = effect.value; return value; } });
+type ParagraphBreak = { from: number; to: number };
+const paragraphBreakEffect = StateEffect.define<ParagraphBreak>();
+function mapParagraphBreaks(value: readonly ParagraphBreak[], changes: ChangeDesc) {
+  return value.map(range => ({ from: changes.mapPos(range.from, 1), to: changes.mapPos(range.to, -1) })).filter(range => range.to - range.from === 2);
+}
+const restoreParagraphBreaks = StateEffect.define<readonly ParagraphBreak[]>({ map: mapParagraphBreaks });
+// Remember only separators inserted by Enter, so pre-existing blank lines keep
+// their normal deletion behavior. History restores this metadata with the text.
+const paragraphBreaks = StateField.define<readonly ParagraphBreak[]>({
+  create: () => [],
+  update(value, transaction) {
+    if (!transaction.docChanged && !transaction.effects.some(effect => effect.is(paragraphBreakEffect) || effect.is(restoreParagraphBreaks))) return value;
+    let result = transaction.docChanged ? mapParagraphBreaks(value, transaction.changes) : value;
+    for (const effect of transaction.effects) {
+      if (effect.is(restoreParagraphBreaks)) result = effect.value;
+      if (effect.is(paragraphBreakEffect)) result = [...result, effect.value];
+    }
+    return result.filter(range => range.to - range.from === 2 && transaction.newDoc.sliceString(range.from, range.to) === '\n\n');
+  },
+  provide: field => invertedEffects.of(transaction => transaction.docChanged && (transaction.startState.field(field).length !== transaction.state.field(field).length || transaction.effects.some(effect => effect.is(paragraphBreakEffect) || effect.is(restoreParagraphBreaks)))
+    ? [restoreParagraphBreaks.of(transaction.startState.field(field))] : []),
+});
 const emoji: Record<string, string> = { smile: '😄', smiling: '😊', grin: '😁', laughing: '😆', joy: '😂', heart: '❤️', blush: '😊', wink: '😉', cry: '😢', sob: '😭', angry: '😠', thinking: '🤔', thinking_face: '🤔', sunglasses: '😎', star: '⭐', sparkles: '✨', fire: '🔥', rocket: '🚀', tada: '🎉', warning: '⚠️', check: '✅', white_check_mark: '✅', x: '❌', thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎', clap: '👏', pray: '🙏', eyes: '👀', memo: '📝', book: '📖', bulb: '💡', computer: '💻', bug: '🐛', coffee: '☕', apple: '🍎', penguin: '🐧', cat: '🐱', dog: '🐶', flag_cn: '🇨🇳', cn: '🇨🇳', ok_hand: '👌', muscle: '💪', 100: '💯' };
 function completeEmoji(context: CompletionContext) {
   const match = context.matchBefore(/:[a-z_0-9+-]*/); if (!match || (!context.explicit && match.text.length < 2)) return null;
@@ -591,6 +613,10 @@ function deleteParagraphBoundary(view: EditorView, backward: boolean): boolean {
   const from = backward ? selection.head - 2 : selection.head, to = from + 2;
   const source = view.state.doc.toString();
   if (from < 0 || to > source.length || source.slice(from, to) !== '\n\n') return false;
+  if (view.state.field(paragraphBreaks).some(range => range.from === from && range.to === to)) {
+    view.dispatch({ changes: { from, to }, selection: { anchor: from }, annotations: isolateHistory.of('full'), scrollIntoView: true });
+    return true;
+  }
   // A paragraph separator is one editing action. Leave additional blank lines,
   // explicit line breaks, nested lists and block widgets to their own keymaps.
   if (source[from - 1] === '\n' || source[to] === '\n') return false;
@@ -659,7 +685,7 @@ function smartEnter(view: EditorView): boolean {
   }
   if (!selection.empty || selection.head !== row.to) {
     if (selection.empty && insertNewlineContinueMarkup(view)) return true;
-    view.dispatch({ changes: { from: selection.from, to: selection.to, insert: '\n\n' }, selection: { anchor: selection.from + 2 }, annotations: isolateHistory.of('full'), scrollIntoView: true }); return true;
+    view.dispatch({ changes: { from: selection.from, to: selection.to, insert: '\n\n' }, effects: paragraphBreakEffect.of({ from: selection.from, to: selection.from + 2 }), selection: { anchor: selection.from + 2 }, annotations: isolateHistory.of('full'), scrollIntoView: true }); return true;
   }
   if (row.number === 1 && row.text === '---') { view.dispatch({ changes: { from: row.to, insert: '\n\n---\n\n' }, selection: { anchor: row.to + 1 } }); return true; }
   if (/^\s*(`{3,}|~{3,})\w*$/.test(row.text)) { const fence = /^\s*(`{3,}|~{3,})/.exec(row.text)![1]; view.dispatch({ changes: { from: row.to, insert: `\n\n${fence}\n` }, selection: { anchor: row.to + 1 } }); focusEmbedded(view, row.to + 1); return true; }
@@ -669,7 +695,7 @@ function smartEnter(view: EditorView): boolean {
     view.dispatch({ changes: { from: row.to, insert: separator }, selection: { anchor: row.to + 1 } }); focusEmbedded(view, row.to + 1); return true;
   }
   if (insertNewlineContinueMarkup(view)) return true;
-  view.dispatch({ changes: { from: selection.from, to: selection.to, insert: row.text.trim() ? '\n\n' : '\n' }, selection: { anchor: selection.from + (row.text.trim() ? 2 : 1) }, scrollIntoView: true }); return true;
+  view.dispatch({ changes: { from: selection.from, to: selection.to, insert: row.text.trim() ? '\n\n' : '\n' }, effects: row.text.trim() ? paragraphBreakEffect.of({ from: selection.from, to: selection.from + 2 }) : [], selection: { anchor: selection.from + (row.text.trim() ? 2 : 1) }, scrollIntoView: true }); return true;
 }
 export class MarkdownEditor {
   readonly view: EditorView;
@@ -746,7 +772,7 @@ export class MarkdownEditor {
       return false;
     } });
     bindings.push({ key: 'Delete', run: view => deleteParagraphBoundary(view, false), preventDefault: false });
-    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), orderedMouseSelection, highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
+    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, paragraphBreaks, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), orderedMouseSelection, highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
       EditorView.updateListener.of(update => { if (update.docChanged && !update.state.field(compositionField)) host.changed(update.state.doc.toString()); }),
       EditorView.domEventHandlers({
         compositionstart(event, view) { if (event.isTrusted && view.hasFocus) { compositionSequence++; view.dispatch({ effects: compositionEffect.of(true) }); } return false; },
