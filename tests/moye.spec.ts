@@ -1848,6 +1848,8 @@ test('大纲按标题层级折叠，点击跳转和键盘导航保持正文完�
 
     await page.getByRole('button', { name: '收起 搜索', exact: true }).click();
     await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(search).toHaveCSS('outline-style', 'none');
+    await expect(search.locator(':scope > .outline-row')).toHaveCSS('outline-style', 'none');
     await expect(bfs).toBeHidden();
     await expect(tree.getByRole('treeitem', { name: '图论', exact: true })).toBeVisible();
     expect(await content(page)).toBe(raw);
@@ -1870,6 +1872,11 @@ test('大纲按标题层级折叠，点击跳转和键盘导航保持正文完�
     await search.focus();
     await page.keyboard.press('ArrowLeft');
     await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(search).toHaveCSS('outline-style', 'none');
+    await expect(search.locator(':scope > .outline-row')).toHaveCSS('outline-style', 'none');
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => {}))));
+    const focused = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+    await fs.writeFile(testInfo.outputPath('outline-focus.png'), Buffer.from(focused, 'base64'));
     await page.keyboard.press('ArrowRight');
     await expect(search).toHaveAttribute('aria-expanded', 'true');
     await page.keyboard.press('ArrowRight');
