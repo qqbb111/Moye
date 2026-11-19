@@ -514,6 +514,45 @@ export function setBlock(view: EditorView, prefix: string) {
   const mapping = view.state.changes(changes);
   view.dispatch({ changes: mapping, selection: view.state.selection.map(mapping, 1), annotations: isolateHistory.of('full'), scrollIntoView: true }); view.focus();
 }
+function setHeading(view: EditorView, level: number | 'increase' | 'decrease') {
+  const { doc, selection } = view.state, range = selection.main;
+  const start = doc.lineAt(range.from).number;
+  const end = doc.lineAt(!range.empty && doc.lineAt(range.to).from === range.to ? range.to - 1 : range.to).number;
+  const source = doc.toString(), starts = new Map<number, number>();
+  walk(parseMarkdown(source), (node, parent) => {
+    const first = doc.lineAt(startOf(node)).number, last = doc.lineAt(endOf(node)).number;
+    if (last < start || first > end) return;
+    if (node.type === 'listItem' || node.type === 'blockquote') {
+      const row = doc.line(first);
+      const marker = (node.type === 'listItem' ? /^[ \t]*(?:[-+*]|\d+[.)])(?:[ \t]+|$)/ : /^>[ \t]?/).exec(source.slice(startOf(node), row.to));
+      if (marker) starts.set(first, startOf(node) + marker[0].length);
+    }
+    if (node.type !== 'paragraph' && node.type !== 'heading') return;
+    for (let number = Math.max(first, start); number <= Math.min(last, end); number++) {
+      const row = doc.line(number);
+      let from = number === first ? startOf(node) : row.from + /^(?:[ \t]*>[ \t]?)*[ \t]*/.exec(row.text)![0].length;
+      // A task marker cannot wrap a heading in GFM. Keep its text so converting
+      // back to a paragraph restores the checkbox and its checked state.
+      if (number === first && parent?.type === 'listItem' && parent.checked != null) {
+        from -= /\[[ xX]\][ \t]+$/.exec(source.slice(row.from, from))?.[0].length ?? 0;
+      }
+      starts.set(number, from);
+    }
+  });
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  for (let number = start; number <= end; number++) {
+    const row = doc.line(number), from = starts.get(number) ?? row.from;
+    const previous = /^(#{1,6})(?:[ \t]+|$)/.exec(source.slice(from, row.to));
+    const depth = previous?.[1].length ?? 0;
+    const next = typeof level === 'number' ? (level === depth ? 0 : level) : Math.max(0, Math.min(6, depth + (level === 'increase' ? 1 : -1)));
+    let insert = next ? '#'.repeat(next) + ' ' : '';
+    if (insert && from > row.from && /\S/.test(source[from - 1])) insert = ' ' + insert;
+    if (insert !== (previous?.[0] ?? '')) changes.push({ from, to: from + (previous?.[0].length ?? 0), insert });
+  }
+  const mapping = view.state.changes(changes);
+  if (changes.length) view.dispatch({ changes: mapping, selection: selection.map(mapping, 1), annotations: isolateHistory.of('full'), scrollIntoView: true });
+  view.focus();
+}
 function insertBlock(view: EditorView, content: string, cursorOffset: number) {
   let { from, to } = view.state.selection.main;
   if (from === to) { const widget = [...view.dom.querySelectorAll<HTMLElement>('.md-block')].find(root => Number(root.dataset.from) < from && Number(root.dataset.to) > from); if (widget) from = to = Number(widget.dataset.to); }
@@ -527,8 +566,8 @@ export function editorAction(view: EditorView, action: string): boolean {
   if (action === 'undo') return undo(view); if (action === 'redo') return redo(view);
   if (action === 'find' || action === 'replace') return openSearchPanel(view);
   if (action === 'tidy-chinese') { const selected = view.state.selection.main; const changes = tidyChineseMarkdown(view.state.doc.toString(), selected.empty ? undefined : { from: selected.from, to: selected.to }); if (changes.length) view.dispatch({ changes, annotations: isolateHistory.of('full') }); return true; }
-  if (/^heading-[0-6]$/.test(action)) { setBlock(view, action === 'heading-0' ? '' : '#'.repeat(Number(action.slice(-1))) + ' '); return true; }
-  if (action === 'heading-increase' || action === 'heading-decrease') { const depth = /^(#{1,6})\s/.exec(view.state.doc.lineAt(view.state.selection.main.head).text)?.[1].length ?? 0; const next = Math.max(0, Math.min(6, depth + (action === 'heading-increase' ? 1 : -1))); setBlock(view, next ? '#'.repeat(next) + ' ' : ''); return true; }
+  if (/^heading-[0-6]$/.test(action)) { setHeading(view, Number(action.slice(-1))); return true; }
+  if (action === 'heading-increase' || action === 'heading-decrease') { setHeading(view, action === 'heading-increase' ? 'increase' : 'decrease'); return true; }
   const formats: Record<string, [string, string?]> = { bold: ['**'], italic: ['*'], underline: ['<u>', '</u>'], strike: ['~~'], 'inline-code': ['`'], highlight: ['=='], subscript: ['~'], superscript: ['^'] };
   if (formats[action]) { wrapSelection(view, ...formats[action]); return true; }
   const blocks: Record<string, string> = { quote: '> ', bullet: '- ', ordered: '1. ', task: '- [ ] ' };

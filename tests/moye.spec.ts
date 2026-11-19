@@ -1423,6 +1423,86 @@ test('组合输入一个 f 时，相邻的已输入字母各自保留字形宽�
   } finally { await application.close(); }
 });
 
+test('标题快捷键保留有序列表编号，撤销和恢复正文保留列表', async ({}, testInfo) => {
+  const { application, page } = await launch();
+  try {
+    const raw = '1. 第一项\n1. 第二项\n1. 第三项\n1. 一个房间\n\n结尾';
+    const titleEnd = raw.indexOf('\n\n');
+    await setContent(page, raw);
+    await page.evaluate(anchor => {
+      const editor = (window as any).__editor.active();
+      editor.view.dispatch({ selection: { anchor } }); editor.focus();
+    }, titleEnd);
+    await page.keyboard.press('Control+3');
+    const expected = raw.replace('1. 一个房间', '1. ### 一个房间');
+    expect(await content(page)).toBe(expected);
+    const title = current(page).locator('.md-list.md-h3');
+    await expect(title.locator('.md-list-number')).toHaveText('4.');
+    await expect(title).toContainText('一个房间');
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(titleEnd + 4);
+    await page.evaluate(() => document.fonts.ready);
+    const native = await application.browserWindow(page);
+    await native.evaluate(window => { window.show(); window.focus(); });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+    await fs.writeFile(testInfo.outputPath('numbered-heading.png'), Buffer.from(png, 'base64'));
+    await page.keyboard.press('Control+z'); expect(await content(page)).toBe(raw);
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(titleEnd);
+    await page.keyboard.press('Control+Shift+z'); expect(await content(page)).toBe(expected);
+    await page.keyboard.press('Control+0'); expect(await content(page)).toBe(raw);
+    await page.keyboard.press('Control+3'); await page.keyboard.press('Control+3'); expect(await content(page)).toBe(raw);
+    await page.keyboard.press('Control+3');
+    await execute(page, 'heading-increase'); expect(await content(page)).toBe(expected.replace('### ', '#### '));
+    await execute(page, 'heading-decrease'); expect(await content(page)).toBe(expected);
+    await page.keyboard.press('Enter'); await page.keyboard.insertText('下一项');
+    expect(await content(page)).toContain('1. ### 一个房间\n2. 下一项');
+    await expect(current(page).locator('.md-list-number').nth(4)).toHaveText('5.');
+  } finally { await application.close(); }
+});
+
+test('标题快捷键保留引用、缩进和多行选区，级别边界不取消标题', async () => {
+  const { application, page } = await launch();
+  try {
+    for (const [raw, expected] of [
+      ['4. 一个房间', '4. ### 一个房间'],
+      ['4) 一个房间', '4) ### 一个房间'],
+      ['- 一个房间', '- ### 一个房间'],
+      ['> 4. 一个房间', '> 4. ### 一个房间'],
+      ['1. 父级\n   - 一个房间', '1. 父级\n   - ### 一个房间'],
+      ['> 一段文字\n> 一个房间', '> 一段文字\n> ### 一个房间'],
+      ['- [x] 一个房间', '- ### [x] 一个房间'],
+      ['4. ', '4. ### '],
+      ['一个房间', '### 一个房间'],
+    ]) {
+      await setContent(page, raw);
+      await page.evaluate(anchor => {
+        const editor = (window as any).__editor.active();
+        editor.view.dispatch({ selection: { anchor } }); editor.focus();
+      }, raw.length);
+      await page.keyboard.press('Control+3'); expect(await content(page)).toBe(expected);
+      await expect(current(page).locator('.md-h3')).toHaveCount(1);
+      await page.keyboard.press('Control+0'); expect(await content(page)).toBe(raw);
+    }
+    const raw = '4. 一个房间\n5. 第二个房间\n6. 保留正文';
+    await setContent(page, raw);
+    await page.evaluate(({ anchor, head }) => {
+      const editor = (window as any).__editor.active();
+      editor.view.dispatch({ selection: { anchor, head } }); editor.focus();
+    }, { anchor: raw.indexOf('\n6.'), head: raw.indexOf('一个') });
+    await page.keyboard.press('Control+3'); expect(await content(page)).toBe('4. ### 一个房间\n5. ### 第二个房间\n6. 保留正文');
+    expect(await page.evaluate(() => {
+      const { anchor, head } = (window as any).__editor.active().view.state.selection.main;
+      return anchor > head;
+    })).toBe(true);
+    await page.keyboard.press('Control+0'); expect(await content(page)).toBe(raw);
+    await page.keyboard.press('Control+6');
+    const deepest = await content(page);
+    await execute(page, 'heading-increase'); expect(await content(page)).toBe(deepest);
+    await page.keyboard.press('Control+0');
+    await execute(page, 'heading-decrease'); expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
 test('有序列表正文起点显示拼音、保留光标，编辑列表标题时露出标题标记', async () => {
   const { application, page } = await launch();
   try {
