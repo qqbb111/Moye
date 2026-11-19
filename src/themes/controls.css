@@ -419,12 +419,11 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .md-table th { background: var(--table-header-bg); font-weight: 600; }
 .md-table td { background: var(--table-cell-bg); }
 .md-table td:hover { background: color-mix(in srgb, var(--ui-accent) 5%, var(--table-cell-bg)); }
-.md-table :is(th, td):focus {
+:root[data-theme] .md-table :is(th, td):focus {
   background: color-mix(in srgb, var(--ui-accent) 9%, var(--table-cell-bg));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent) 65%, transparent);
+  outline: none;
   caret-color: var(--fg);
 }
-.md-table :is(th, td):focus-visible { outline-offset: -2px; }
 .md-table a { color: var(--ui-accent); }
 .table-toolbar {
   display: flex;

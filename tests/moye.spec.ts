@@ -1716,7 +1716,7 @@ test('表格单元格、Tab 导航、扩展行列和代码块连续输入', asyn
   } finally { await application.close(); }
 });
 
-test('表格空行保持一行高度，选区使用柔和主题色，插入行后直接编辑', async () => {
+test('表格空行保持一行高度，选区使用柔和主题色，插入行后直接编辑', async ({}, testInfo) => {
   const { application, page } = await launch();
   try {
     await setContent(page, '## 连通性与环\n\n| 题面信号 | 去哪 |\n| --- | --- |\n| 割点与桥 | 双连通分量 |\n|  |  |\n');
@@ -1738,6 +1738,33 @@ test('表格空行保持一行高度，选区使用柔和主题色，插入行�
     });
     expect(selection[3]).toBe(255);
     expect(selection[2]).toBeLessThanOrEqual(selection[1]);
+
+    const native = await application.browserWindow(page);
+    for (const theme of ['light', 'dark', 'workbuddy', 'copilot', 'transparent'] as const) {
+      await page.evaluate(theme => window.moye.updatePreferences({ theme }), theme);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await cell.click();
+      await expect(cell).toHaveCSS('outline-style', 'none');
+      await expect(cell).toHaveCSS('box-shadow', 'none');
+      await page.keyboard.press('Tab');
+      const next = dataRow.locator('td').nth(1);
+      await expect(next).toBeFocused();
+      await expect(next).toHaveCSS('outline-style', 'none');
+      await expect(next).toHaveCSS('box-shadow', 'none');
+      await page.keyboard.press('Shift+Tab');
+      await expect(cell).toBeFocused();
+      await table.locator('th').first().focus();
+      await expect(table.locator('th').first()).toHaveCSS('outline-style', 'none');
+      await expect(table.locator('th').first()).toHaveCSS('box-shadow', 'none');
+      await cell.click();
+      if (theme === 'light' || theme === 'workbuddy') {
+        await page.evaluate(() => document.fonts.ready);
+        const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+        await fs.writeFile(testInfo.outputPath(`table-focus-${theme}.png`), Buffer.from(png, 'base64'));
+      }
+    }
+    await page.evaluate(() => window.moye.updatePreferences({ theme: 'light' }));
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
     const toolbar = current(page).getByRole('group', { name: '表格操作' });
     const buttons = (await toolbar.boundingBox())!;
