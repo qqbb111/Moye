@@ -329,6 +329,18 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .sidebar-row { min-height: 34px; transition: background-color var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease; }
 #sidebar-open-folder { flex: none; border-radius: 0; }
 .sidebar-row.pending-activation { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.outline-tree { padding-block: 2px; }
+.outline-node:focus-visible { outline: none; }
+.outline-node:focus-visible > .outline-row { outline: 1px solid var(--ui-accent); outline-offset: -2px; }
+.outline-row { display: flex; align-items: center; gap: 3px; margin-bottom: 2px; padding: 3px 6px 3px calc(4px + var(--outline-depth) * 12px); cursor: pointer; }
+.outline-row:hover { background: var(--hover); }
+.outline-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.outline-toggle, .outline-spacer { width: 22px; flex: 0 0 22px; }
+.outline-toggle { height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; color: var(--muted); }
+.outline-toggle:hover { color: var(--ui-accent); background: var(--ui-accent-soft); }
+.outline-toggle .moye-icon { width: 13px; height: 13px; transition: transform var(--ui-motion-fast) ease; }
+.outline-node[aria-expanded='true'] > .outline-row > .outline-toggle .moye-icon { transform: rotate(90deg); }
+.outline-group { overflow: hidden; }
 .folder-heading { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .folder-branch { position: relative; }
 .folder-branch > details > summary { min-height: 34px; padding-right: 34px; }

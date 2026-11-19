@@ -1832,6 +1832,113 @@ test('输入转换、列表延续、格式快捷键、查找和菜单剪贴板',
   } finally { await application.close(); }
 });
 
+test('大纲按标题层级折叠，点击跳转和键盘导航保持正文完整', async ({}, testInfo) => {
+  const { application, page } = await launch();
+  const raw = '# 笔记\n\n正文。\n\n## 搜索\n\n#### BFS\n\n搜索内容。\n\n## 图论\n\n### 最短路\n\n图论内容。\n\n# 附录\n\n### 补充\n\n结尾。';
+  try {
+    await setContent(page, raw);
+    await execute(page, 'outline');
+    const tree = page.locator('#sidebar-content').getByRole('tree');
+    const note = tree.getByRole('treeitem', { name: '笔记', exact: true });
+    const search = tree.getByRole('treeitem', { name: '搜索', exact: true });
+    const bfs = tree.getByRole('treeitem', { name: 'BFS', exact: true });
+    await expect(tree.getByRole('treeitem')).toHaveCount(7);
+    await expect(search.getByRole('treeitem', { name: 'BFS', exact: true })).toBeVisible();
+    await expect(bfs).toHaveAttribute('aria-level', '3');
+
+    await page.getByRole('button', { name: '收起 搜索', exact: true }).click();
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(bfs).toBeHidden();
+    await expect(tree.getByRole('treeitem', { name: '图论', exact: true })).toBeVisible();
+    expect(await content(page)).toBe(raw);
+    await page.getByRole('button', { name: '展开 搜索', exact: true }).click();
+    await search.getByText('搜索', { exact: true }).click();
+    await expect(search).toHaveAttribute('aria-expanded', 'true');
+    await expect(bfs).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(raw.indexOf('## 搜索'));
+
+    const native = await application.browserWindow(page);
+    await native.evaluate(window => { window.setBounds({ width: 1000, height: 740 }); window.showInactive(); });
+    for (const theme of ['light', 'dark']) {
+      await execute(page, theme);
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => {}))));
+      const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+      await fs.writeFile(testInfo.outputPath(`outline-tree-${theme}.png`), Buffer.from(png, 'base64'));
+    }
+
+    await search.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('ArrowRight');
+    await expect(search).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('ArrowRight');
+    await expect(bfs).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(search).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(bfs).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(tree.getByRole('treeitem', { name: '补充', exact: true })).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(note).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(search).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(current(page).locator('.markdown-editor > .cm-scroller > .cm-content')).toBeFocused();
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
+test('大纲折叠按文档保留，搜索和正文编辑不会清除折叠状态', async () => {
+  const { application, page } = await launch();
+  const raw = '# 笔记\n\n正文。\n\n## 搜索\n\n### BFS\n\n内容。\n\n## 图论\n\n### 最短路\n\n结尾。';
+  try {
+    await setContent(page, raw);
+    await execute(page, 'outline');
+    const tree = page.locator('#sidebar-content').getByRole('tree');
+    const search = tree.getByRole('treeitem', { name: '搜索', exact: true });
+    const bfs = tree.getByRole('treeitem', { name: 'BFS', exact: true });
+    await page.getByRole('button', { name: '收起 搜索', exact: true }).click();
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    const filter = page.getByRole('searchbox', { name: '筛选侧栏' });
+    await filter.fill('BFS');
+    await expect(tree.getByRole('treeitem')).toHaveCount(1);
+    await expect(bfs).toBeVisible();
+    await filter.fill('');
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(bfs).toBeHidden();
+
+    await page.locator('[data-library="files"]').click();
+    await page.locator('[data-library="outline"]').click();
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await execute(page, 'sidebar');
+    await expect(page.locator('#sidebar')).toBeHidden();
+    await execute(page, 'sidebar');
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+
+    const edited = raw.replace('正文。', '新增的正文内容。');
+    await setContent(page, edited);
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(bfs).toBeHidden();
+    await execute(page, 'new');
+    await expect(page.locator('.tab')).toHaveCount(2);
+    await setContent(page, raw);
+    await expect(search).toHaveAttribute('aria-expanded', 'true');
+    await expect(bfs).toBeVisible();
+    await page.getByRole('button', { name: '收起 笔记', exact: true }).click();
+    await execute(page, 'previous-tab');
+    await expect.poll(() => content(page)).toBe(edited);
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(bfs).toBeHidden();
+    await execute(page, 'dark');
+    await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await execute(page, 'next-tab');
+    await expect(tree.getByRole('treeitem', { name: '笔记', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
+});
+
 test('大纲与目录隐藏标题高亮标记，正文高亮随主题更新', async () => {
   const { application, page } = await launch();
   const raw = '[toc]\n\n## ==重点== 与 `a == b == c`\n\n## <mark>例题</mark>\n\n正文 ==结论==。\n';

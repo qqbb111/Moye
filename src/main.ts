@@ -21,6 +21,7 @@ import { Settings } from './settings';
 import { COMMANDS, commandKeys, shortcutFromEvent } from '../shared/commands';
 import { selectLine } from '@codemirror/commands';
 import { headings, type MarkdownNode } from './markdown';
+import { outlineTree } from './outline';
 import type { WorkspaceView, WorkspaceUpdate, WorkspaceDocumentUpdate, DocumentView, ActionResult, FolderEntry, FolderView, DocumentReference, SaveMode } from '../shared/types';
 
 const bridge = window.moye;
@@ -56,6 +57,7 @@ let tabSignature = ''; let draggedTab: string | null = null;
 let measuredAppearance = '';
 let sidebarSignature = ''; let resizingSidebar = false; let quickSelection = 0;
 const expandedFolders = new Set<string>();
+const collapsedHeadings = new Map<string, Set<string>>();
 const nameOf = (file: string) => file.split(/[\\/]/).filter(Boolean).at(-1) ?? file;
 const activeDocument = () => workspace?.documents.find(doc => doc.id === workspace.activeId);
 const activeEditor = () => slots.get(workspace?.activeId ?? '')?.editor;
@@ -462,13 +464,27 @@ function renderSidebar() {
     return;
   }
   sidebarSignature = signature;
+  const outlineFocus = library === 'outline' ? (document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-outline-key]')?.dataset.outlineKey : undefined;
+  const previousScroll = container.scrollTop;
   const empty = (text: string) => { const hint = document.createElement('p'); hint.className = 'sidebar-empty'; hint.textContent = text; return hint; };
   container.replaceChildren();
   for (const button of document.querySelectorAll<HTMLElement>('[data-library]')) { const active = button.dataset.library === library; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
   $('#sidebar-open-folder').hidden = library !== 'files';
   $<HTMLInputElement>('#sidebar-filter').placeholder = library === 'outline' ? '搜索大纲' : library === 'files' ? '搜索文件' : '搜索草稿';
   if (library === 'outline') {
-    const doc = activeDocument(); if (!doc) return; for (const heading of outline.filter(heading => matches(heading.text))) { const element = row(heading.text, () => { const editor = activeEditor()!; editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus(); }); element.style.paddingLeft = `${18 + (heading.level - 1) * 12}px`; element.dataset.level = String(heading.level); container.append(element); }
+    const doc = activeDocument(); if (!doc) return;
+    let collapsed = collapsedHeadings.get(doc.id);
+    if (!collapsed) { collapsed = new Set(); collapsedHeadings.set(doc.id, collapsed); }
+    const matching = outline.filter(heading => matches(heading.text));
+    if (matching.length) {
+      const tree = outlineTree(matching, collapsed, heading => {
+        const editor = activeEditor(); if (!editor) return;
+        editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus();
+      }, !!query);
+      container.append(tree);
+      if (outlineFocus) [...tree.querySelectorAll<HTMLElement>('[data-outline-key]')].find(node => node.dataset.outlineKey === outlineFocus && !node.closest('[hidden]'))?.focus({ preventScroll: true });
+      container.scrollTop = previousScroll;
+    }
     if (!container.childElementCount) container.append(empty(query ? '没有匹配的标题' : '尚无标题'));
   } else if (library === 'drafts') {
     for (const doc of workspace.drafts.filter(doc => matches(doc.title))) container.append(fileRow(documentTarget(doc), () => void run(() => bridge.restoreDraft(doc.id)), '恢复草稿', 'history', true));
