@@ -253,7 +253,14 @@ test('快捷键名称仅录制绑定，说明按需显示且设置控件可通�
     await page.getByRole('tab', { name: '常规', exact: true }).click();
     await expect(page.locator('#code-theme-refresh')).toBeHidden(); await page.locator('#code-theme-select').selectOption('vscode'); await expect(page.locator('#code-theme-refresh')).toBeVisible();
     await page.locator('#code-theme-select').selectOption('github-dark'); await expect(page.locator('#code-theme-refresh')).toBeHidden();
-    await page.getByRole('button', { name: '了解中文排版整理' }).focus(); await page.keyboard.press('Enter'); await expect(page.getByRole('tooltip')).toBeVisible();
+    const native = await application.browserWindow(page); await native.evaluate(window => window.setBounds({ width: 640, height: 420 }));
+    await page.getByRole('button', { name: '了解中文排版整理' }).evaluate(button => { button.scrollIntoView({ block: 'end' }); button.focus({ preventScroll: true }); });
+    await page.keyboard.press('Enter'); await expect(page.getByRole('tooltip')).toBeVisible();
+    await expect.poll(async () => {
+      const bounds = await page.getByRole('tooltip').boundingBox();
+      const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+      return !!bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y + bounds.height <= viewport.height;
+    }).toBe(true);
     await page.keyboard.press('Escape'); await expect(page.getByRole('tooltip')).toBeHidden(); await expect(page.locator('#preferences')).toBeVisible();
     const toggle = page.getByRole('switch', { name: '保存前整理中文排版', exact: true }); await toggle.focus(); await page.keyboard.press('Space'); await expect(toggle).toBeChecked();
     await expect.poll(() => page.evaluate(async () => (await window.moye.bootstrap()).preferences.formatOnSave)).toBe(true);
@@ -287,6 +294,31 @@ test('设置下拉使用主题选中态，支持键盘选择和退出', async ()
     await expect(theme).toHaveValue('dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect(page.locator('#preferences')).toBeVisible();
+  } finally { await application.close(); }
+});
+
+test('设置关闭后返回键盘触发入口，版本信息能够复制', async () => {
+  const { application, page } = await launch();
+  try {
+    const trigger = page.getByRole('button', { name: '设置', exact: true });
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#preferences')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await page.getByRole('tab', { name: '关于', exact: true }).click();
+    const version = page.locator('.about-version > span');
+    const rect = await version.boundingBox();
+    if (!rect) throw new Error('版本信息不可见');
+    await page.mouse.move(rect.x + 1, rect.y + rect.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rect.x + rect.width - 1, rect.y + rect.height / 2, { steps: 8 });
+    await page.mouse.up();
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toContain('版本');
+    await page.keyboard.press('Control+c');
+    expect(await application.evaluate(({ clipboard }) => clipboard.readText())).toContain('版本');
   } finally { await application.close(); }
 });
 
@@ -468,6 +500,52 @@ test('编辑器右键菜单跟随主题，键盘复制保留表格选区', async
     await expect(menu).toBeHidden();
     await expect(cell).toBeFocused();
     expect(await page.evaluate(() => window.moye.clipboard('read'))).toBe('格选');
+  } finally { await application.close(); }
+});
+
+test('菜单方向键保持导航，输入字母不会改写正文，退出返回菜单入口', async () => {
+  const { application, page } = await launch();
+  const raw = '菜单打开时保留正文。';
+  try {
+    await setContent(page, raw);
+    const file = page.getByRole('button', { name: '文件', exact: true });
+    const menu = page.getByRole('menu');
+    await file.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(menu).toBeVisible();
+    await page.keyboard.type('x');
+    expect(await content(page)).toBe(raw);
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(menu).toHaveAttribute('aria-label', '编辑');
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowRight');
+    await expect(menu).toHaveAttribute('aria-label', '段落');
+    await page.keyboard.press('ArrowLeft');
+    await expect(menu).toHaveAttribute('aria-label', '编辑');
+    await expect(menu.getByRole('menuitem', { name: '段落 ›', exact: true })).toBeFocused();
+    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowRight');
+    await expect(menu).toHaveAttribute('aria-label', '主题');
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(page.getByRole('button', { name: '主题', exact: true })).toBeFocused();
+    expect(await content(page)).toBe(raw);
+
+    await current(page).locator('.cm-content').focus();
+    await page.keyboard.press('Control+End');
+    await file.click();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 });
+    const prevented = await current(page).locator('.cm-content').evaluate(element => {
+      const event = new KeyboardEvent('keydown', { key: 'Process', keyCode: 229, isComposing: true, cancelable: true, bubbles: true });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(prevented).toBe(false);
+    await expect(menu).toBeHidden();
+    await cdp.send('Input.insertText', { text: '中' });
+    expect(await content(page)).toBe(raw + '中');
   } finally { await application.close(); }
 });
 
@@ -1089,6 +1167,65 @@ test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保�
     expect(await content(app.page)).toBe(raw); const profile = app.profile; await app.application.close(); app = await launch(profile);
     await expect(app.page.getByRole('separator', { name: '调整侧栏宽度' })).toHaveAttribute('aria-valuenow', '320'); await expect.poll(() => app.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--reading-width'))).toBe('720px'); expect(await content(app.page)).toBe(raw);
   } finally { await app.application.close(); }
+});
+
+test('文件夹快速展开收起只加载一次，调整侧栏丢失捕获后仍可选择正文', async () => {
+  const { application, page, directory } = await launch();
+  const folder = path.join(directory, '笔记');
+  const child = path.join(folder, '资料');
+  await fs.mkdir(child, { recursive: true });
+  const file = path.join(child, '示例.md');
+  await fs.writeFile(file, '# 示例');
+  try {
+    await application.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder);
+    await execute(page, 'folder');
+    await application.evaluate(({ ipcMain }, file) => {
+      (globalThis as any).__folderResolvers = [];
+      ipcMain.removeHandler('folder:list');
+      ipcMain.handle('folder:list', () => new Promise(resolve => {
+        (globalThis as any).__folderResolvers.push(() => resolve([{ name: '示例.md', path: file, directory: false }]));
+      }));
+    }, file);
+    const summary = page.locator('#sidebar-content summary').filter({ hasText: '资料' });
+    await summary.click();
+    await expect.poll(() => application.evaluate(() => (globalThis as any).__folderResolvers.length)).toBe(1);
+    await summary.click();
+    await summary.click();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await application.evaluate(() => (globalThis as any).__folderResolvers.length)).toBe(1);
+    await application.evaluate(() => { for (const resolve of (globalThis as any).__folderResolvers) resolve(); });
+    await expect(page.locator('#sidebar-content [data-file-row]')).toHaveCount(1);
+
+    const separator = page.getByRole('separator', { name: '调整侧栏宽度' });
+    const bounds = (await separator.boundingBox())!;
+    await page.mouse.move(bounds.x + 2, bounds.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + 20, bounds.y + 30);
+    await expect(page.locator('#app')).toHaveClass(/resizing-sidebar/);
+    await separator.evaluate(element => element.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 1 })));
+    await page.mouse.up();
+    await expect(page.locator('#app')).not.toHaveClass(/resizing-sidebar/);
+    await expect(current(page).locator('.cm-content')).toHaveCSS('user-select', 'text');
+  } finally { await application.close(); }
+});
+
+test('保存错误可以选择并复制，复制提示不替换正文剪贴板内容', async () => {
+  const { application, page, directory } = await launch();
+  const raw = '保存失败后仍保留的正文。';
+  try {
+    await setContent(page, raw);
+    await chooseSave(application, directory);
+    await execute(page, 'save');
+    const notice = page.locator('#toast');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveCSS('user-select', 'text');
+    await notice.dblclick();
+    const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+    expect(selected.length).toBeGreaterThan(0);
+    await page.keyboard.press('Control+c');
+    await expect.poll(() => application.evaluate(({ clipboard }) => clipboard.readText())).toBe(selected);
+    expect(await content(page)).toBe(raw);
+  } finally { await application.close(); }
 });
 
 test('快速打开去重并支持方向键选择和路径搜索，中文组合输入回车不误打开', async () => {
@@ -1994,6 +2131,54 @@ test('插入表格后输入留在单元格，Tab 续行与菜单插入均可直�
     const raw = await content(page); expect(raw).toContain('| 列一 | 列二 |'); expect(raw).toContain('| 数据一 | 数据二 |'); expect(raw).toContain('| 新行一 |  |'); expect(raw).toMatch(/^前文正文\n\n\|/);
     await toolbarAction(page, '段落', '表格'); await expect(current(page).locator('table')).toHaveCount(2);
     await page.keyboard.insertText('新表头'); await expect.poll(() => content(page)).toContain('| 新表头 | 标题 |'); expect(errors).toEqual([]);
+  } finally { await application.close(); }
+});
+
+test('表格和代码块组合输入时导航按键不会提前跳出编辑区', async () => {
+  const { application, page } = await launch();
+  try {
+    const table = '| 标题 |\n| --- |\n| 原内容 |';
+    await setContent(page, table);
+    const cell = current(page).locator('td');
+    await cell.click();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'zhong', selectionStart: 5, selectionEnd: 5 });
+    await expect(cell).toBeFocused();
+    for (const key of ['Enter', 'Tab', 'Escape']) {
+      const allowed = await cell.evaluate((element, key) => element.dispatchEvent(new KeyboardEvent('keydown', {
+        key, code: key, isComposing: true, bubbles: true, cancelable: true,
+      })), key);
+      expect(allowed).toBe(true);
+      await expect(cell).toBeFocused();
+    }
+    await cdp.send('Input.insertText', { text: '中文' });
+    await expect.poll(() => content(page)).toBe(table.replace('原内容', '中文'));
+
+    const source = '```cpp\nfirst\nlast\n```';
+    await setContent(page, source);
+    const code = current(page).locator('.code-content .cm-content');
+    await code.click();
+    await page.keyboard.press('Control+End');
+    const allowed = await code.evaluate(element => element.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowDown', code: 'ArrowDown', isComposing: true, bubbles: true, cancelable: true,
+    })));
+    expect(allowed).toBe(true);
+    await expect(code).toBeFocused();
+    expect(await content(page)).toBe(source);
+    await page.keyboard.press('Control+Home');
+    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowDown');
+    await expect(code).toBeFocused();
+    const position = await code.evaluate(element => {
+      const selection = window.getSelection()!;
+      return { line: selection.anchorNode?.parentElement?.closest('.cm-line')?.textContent, offset: selection.anchorOffset };
+    });
+    expect(position).toEqual({ line: 'last', offset: 4 });
+    await page.keyboard.press('Shift+ArrowDown');
+    await expect(code).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(current(page).locator('.markdown-editor > .cm-scroller > .cm-content')).toBeFocused();
+    expect(await content(page)).toBe(`${source}\n\n`);
   } finally { await application.close(); }
 });
 

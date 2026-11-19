@@ -86,6 +86,23 @@ test('未命名草稿和窗口标签顺序可以在新进程中恢复', async ()
     try { const view = restored.view(windowId); assert.deepEqual(view.documents.map(doc => doc.id), [first, second]); assert.equal(view.activeId, first); assert.equal(view.documents[0].content, '# 中文草稿\n\n还没有命名。'); assert.equal(view.documents[0].dirty, true); } finally { restored.dispose(); }
   } finally { store.dispose(); }
 });
+test('重启后新建草稿沿用未命名编号，保留已关闭草稿的名称', async () => {
+  const { store, windowId } = await setup();
+  try {
+    const first = store.newDocument(windowId, '第一份草稿');
+    const second = store.newDocument(windowId, '第二份草稿');
+    await store.closeDocument(windowId, second);
+    await store.flush();
+    const restored = new DocumentStore(store.directory);
+    try {
+      await restored.initialize();
+      const third = restored.newDocument(windowId);
+      assert.equal(restored.documents.get(first)?.title, '未命名 1');
+      assert.equal(restored.documents.get(second)?.title, '未命名 2');
+      assert.equal(restored.documents.get(third)?.title, '未命名 3');
+    } finally { restored.dispose(); }
+  } finally { store.dispose(); }
+});
 test('关闭未命名标签保留草稿，恢复时仍然包含完整内容', async () => {
   const { store, windowId } = await setup();
   try { const id = store.newDocument(windowId); store.update(windowId, id, '未保存的灵感', 1); await store.closeDocument(windowId, id); assert.equal(store.view(windowId).documents.length, 0); assert.equal(store.view(windowId).drafts[0].content, '未保存的灵感'); store.restore(windowId, id); assert.equal(store.view(windowId).documents[0].content, '未保存的灵感'); } finally { store.dispose(); }
@@ -137,6 +154,7 @@ test('自动保存写回 UTF-8 文件并保留 BOM 和 CRLF，同时保存原文
     assert.equal(await fs.readFile(path.join(store.directory, 'backups', `${id}.md`), 'utf8'), original);
   } finally {
     store.dispose();
+    await store.flush(false);
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
@@ -269,6 +287,66 @@ test('关闭窗口写入失败保留文档归属与草稿，恢复写入后关�
 test('两个窗口打开同一路径会找到同一份文档，禁止另存为覆盖其他标签', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '唯一.md'); await fs.writeFile(file, '文档');
   try { const first = await store.openFile(windowId, file); const secondWindow = store.newWindow(); const second = await store.openFile(secondWindow, file); assert.deepEqual(second, first); const untitled = store.newDocument(secondWindow, '另一份内容'); await assert.rejects(store.save(untitled, file), /其他标签页/); assert.equal(await fs.readFile(file, 'utf8'), '文档'); } finally { store.dispose(); }
+});
+test('两个窗口同时打开同一路径只创建一份文档和归属', async () => {
+  const { directory, store, windowId } = await setup();
+  const file = path.join(directory, '并发打开.md');
+  try {
+    await fs.writeFile(file, '同一份文档');
+    const other = store.newWindow();
+    const opened = await Promise.all([store.openFile(windowId, file), store.openFile(other, file)]);
+    assert.deepEqual(opened[0], opened[1]);
+    assert.equal(store.documents.size, 1);
+    assert.equal([...store.windows.values()].reduce((count, window) => count + window.documentIds.length, 0), 1);
+  } finally { store.dispose(); }
+});
+test('两个窗口同时另存为同一路径时保留一份归属及另一份未保存内容', async () => {
+  const { directory, store, windowId } = await setup();
+  const original = [path.join(directory, '第一份.md'), path.join(directory, '第二份.md')];
+  const target = path.join(directory, '共同目标.md');
+  try {
+    store.setPreferences({ autoSave: false });
+    await fs.writeFile(original[0], '第一份原文');
+    await fs.writeFile(original[1], '第二份原文');
+    const windows = [windowId, store.newWindow()];
+    const documents = await Promise.all(original.map((file, index) => store.openFile(windows[index], file)));
+    documents.forEach(({ id }, index) => store.update(windows[index], id, `${index + 1} 的未保存修改`, 1));
+    const results = await Promise.allSettled(documents.map(({ id }) => store.save(id, target, true)));
+    const winner = results.findIndex(result => result.status === 'fulfilled');
+    const rejected = results.find(result => result.status === 'rejected');
+    assert.ok(winner >= 0);
+    assert.ok(rejected);
+    assert.match(rejected.reason.message, /其他标签页/);
+    assert.equal([...store.documents.values()].filter(document => document.path === target).length, 1);
+    assert.equal(await fs.readFile(target, 'utf8'), `${winner + 1} 的未保存修改`);
+    const other = 1 - winner;
+    assert.equal(store.documents.get(documents[other].id)?.path, original[other]);
+    assert.equal(store.documents.get(documents[other].id)?.content, `${other + 1} 的未保存修改`);
+    assert.equal(store.documents.get(documents[other].id)?.dirty, true);
+    assert.equal(await fs.readFile(original[0], 'utf8'), '第一份原文');
+    assert.equal(await fs.readFile(original[1], 'utf8'), '第二份原文');
+  } finally { store.dispose(); }
+});
+test('另存为写盘期间打开目标时等待保存完成并复用文档', async () => {
+  const { directory, store, windowId } = await setup();
+  const target = path.join(directory, '保存后打开.md');
+  const id = store.newDocument(windowId, '写盘中的草稿');
+  const otherWindow = store.newWindow();
+  let entered!: () => void, release!: () => void;
+  const materializing = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = store.images.materialize.bind(store.images);
+  store.images.materialize = async (...args) => { entered(); await gate; return original(...args); };
+  try {
+    const saving = store.save(id, target, true);
+    await materializing;
+    const opening = store.openFile(otherWindow, target);
+    release();
+    await saving;
+    assert.deepEqual(await opening, { id, windowId });
+    assert.equal(store.documents.size, 1);
+    assert.equal(await fs.readFile(target, 'utf8'), '写盘中的草稿');
+  } finally { release(); store.dispose(); }
 });
 test('关闭自动保存后只保存草稿，较早的编辑消息不会回滚新内容', async () => {
   const { directory, store, windowId } = await setup(); const file = path.join(directory, '手动.md'); await fs.writeFile(file, '原文');

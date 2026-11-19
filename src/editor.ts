@@ -230,6 +230,9 @@ class BlockWidget extends WidgetType {
     copy.onmousedown = event => event.preventDefault();
     copy.onclick = () => { const editor = widgetEditors.get(root); void window.moye.clipboard('write', editor?.state.doc.toString() ?? '').then(() => { clearTimeout(copyTimer); copy.innerHTML = checkIcon; copy.dataset.copied = 'true'; copy.title = '已复制'; copy.setAttribute('aria-label', '已复制'); copyTimer = setTimeout(() => { copy.innerHTML = copyIcon; delete copy.dataset.copied; copy.title = '复制代码'; copy.setAttribute('aria-label', '复制代码'); }, 1500); }).catch(() => { copy.title = '复制失败，请重试'; }); };
     toolbar.append(language, count, wrap, copy); const content = document.createElement('div'); content.className = 'code-content'; root.append(toolbar, content);
+    content.addEventListener('keydown', event => {
+      if (event.isComposing || event.keyCode === 229) event.stopPropagation();
+    }, true);
     let applying = false;
     const commit = (value: string) => {
       if (applying) return; const current: Context = (root as any).context;
@@ -240,7 +243,15 @@ class BlockWidget extends WidgetType {
     };
     const languageConfig = new Compartment(); const gutterConfig = new Compartment(); let numbered = !!ctx.host.workbuddy?.();
     let github: ReturnType<typeof attachGithubHighlighting>;
-    const extensions: Extension[] = [history(), drawSelection(), githubTokens, syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), gutterConfig.of(numbered ? lineNumbers() : []), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Mod-Shift-z', run: redo }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); github?.refresh(); commit(update.state.doc.toString()); } })];
+    const extensions: Extension[] = [history(), drawSelection(), githubTokens, syntaxHighlighting(vscodeHighlightStyle), languageConfig.of([]), gutterConfig.of(numbered ? lineNumbers() : []), wrapConfig.of(wrapExtensions(wrapping)), bracketMatching(), keymap.of([{ key: 'Mod-Shift-z', run: redo }, {
+      key: 'ArrowDown',
+      run(view) {
+        const selection = view.state.selection.main;
+        if (view.compositionStarted || !selection.empty || selection.head !== view.state.doc.length) return false;
+        enterAfter(outer, ((root as any).context as Context).to);
+        return true;
+      },
+    }, indentWithTab, ...defaultKeymap, ...historyKeymap]), EditorView.contentAttributes.of({ 'aria-label': '代码块编辑区', spellcheck: 'false' }), EditorView.updateListener.of(update => { if (update.docChanged) { updateCount(update.state); github?.refresh(); commit(update.state.doc.toString()); } })];
     const code = new EditorView({ state: EditorState.create({ doc: ctx.node.value ?? '', extensions }), parent: content }); widgetEditors.set(root, code);
     github = attachGithubHighlighting(code, () => language.value);
     const setAppearance = (workbuddy: boolean, githubDark: boolean) => {
@@ -271,7 +282,6 @@ class BlockWidget extends WidgetType {
     (root as any).syncLanguage = syncLanguage; syncLanguage(language.value);
     language.onchange = () => commit(code.state.doc.toString());
     (root as any).syncCode = (value: string) => { if (code.state.doc.toString() === value) return; applying = true; code.dispatch({ changes: { from: 0, to: code.state.doc.length, insert: value } }); applying = false; };
-    root.addEventListener('keydown', event => { if (event.key === 'ArrowDown' && code.state.selection.main.head === code.state.doc.length) { event.preventDefault(); enterAfter(outer, ((root as any).context as Context).to); } });
   }
   table(root: HTMLElement, outer: EditorView) {
     const toolbar = document.createElement('div'); toolbar.className = 'table-toolbar';
@@ -335,6 +345,7 @@ class BlockWidget extends WidgetType {
         cell.oninput = event => { event.stopPropagation(); rows[index][col] = cell.textContent ?? ''; commit(!event.isTrusted); };
         cell.onkeydown = event => {
           event.stopPropagation();
+          if (event.isComposing || event.keyCode === 229) return;
           if (event.key === 'Tab') { event.preventDefault(); const cells = [...table.querySelectorAll<HTMLElement>('th,td')]; const next = cells[cells.indexOf(cell) + (event.shiftKey ? -1 : 1)]; if (next) next.focus(); else if (!event.shiftKey) { cell.blur(); insertRow(rows.length, 0); } }
           if (event.key === 'Enter') { event.preventDefault(); cell.blur(); enterAfter(outer, ((root as any).context as Context).to); }
           if (event.key === 'Escape') { event.preventDefault(); cell.textContent = rows[index][col]; cell.blur(); outer.focus(); }

@@ -511,7 +511,15 @@ function renderTree(container: HTMLElement, entries: FolderEntry[], depth: numbe
       const label = document.createElement('span'); label.className = 'folder-label'; label.textContent = entry.name;
       summary.append(label); summary.style.paddingLeft = `${18 + depth * 14}px`;
       const children = document.createElement('div'); details.append(summary, children);
-      details.addEventListener('toggle', () => { if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path); if (details.open && !children.childElementCount) void bridge.listFolder(entry.path).then(entries => { if (children.isConnected) renderTree(children, entries, depth + 1); }).catch(error => toast(error.message)); });
+      let loading = false;
+      details.addEventListener('toggle', () => {
+        if (details.open) expandedFolders.add(entry.path); else expandedFolders.delete(entry.path);
+        if (!details.open || children.childElementCount || loading) return;
+        loading = true;
+        void bridge.listFolder(entry.path).then(entries => {
+          if (children.isConnected) renderTree(children, entries, depth + 1);
+        }).catch(error => toast(error.message)).finally(() => { loading = false; });
+      });
       details.open = expandedFolders.has(entry.path);
       const enter = document.createElement('button'); enter.className = 'folder-enter'; enter.type = 'button';
       enter.innerHTML = icon('arrow-right'); enter.dataset.folderPath = entry.path;
@@ -535,10 +543,11 @@ function hideMenu(restoreFocus = false) {
   }
 }
 let toolbarMenu: HTMLButtonElement | undefined;
-function addMenuItem(label: string, action: () => void, options: { disabled?: boolean; selected?: boolean; shortcut?: string; keepOpen?: boolean } = {}, group = $('#menu')) {
+function addMenuItem(label: string, action: () => void, options: { disabled?: boolean; selected?: boolean; shortcut?: string; keepOpen?: boolean; submenu?: string } = {}, group = $('#menu')) {
   const button = document.createElement('button');
   button.type = 'button'; button.role = options.selected === undefined ? 'menuitem' : 'menuitemradio'; button.tabIndex = -1;
   button.textContent = label; button.disabled = !!options.disabled;
+  if (options.submenu) { button.dataset.menuSection = options.submenu; button.setAttribute('aria-haspopup', 'menu'); }
   if (options.selected !== undefined) {
     button.setAttribute('aria-checked', String(options.selected));
     if (options.selected) button.insertAdjacentHTML('beforeend', icon('check'));
@@ -573,6 +582,7 @@ function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = t
   const menu = $('#menu');
   if (toolbarMenu !== trigger) {
     hideMenu(true);
+    if (focus) trigger.focus({ preventScroll: true });
     rememberMenuOrigin(document.activeElement as HTMLElement);
     toolbarMenu = trigger;
     trigger.setAttribute('aria-expanded', 'true');
@@ -604,7 +614,7 @@ function openToolbarMenu(trigger: HTMLButtonElement, focus: boolean, section = t
       addMenuItem('返回编辑', () => openToolbarMenu(trigger, true), { keepOpen: true }); separateMenu();
     }
     if (section === '编辑') {
-      for (const category of ['段落', '格式', '视图']) addMenuItem(category + ' ›', () => openToolbarMenu(trigger, true, category), { keepOpen: true });
+      for (const category of ['段落', '格式', '视图']) addMenuItem(category + ' ›', () => openToolbarMenu(trigger, true, category), { keepOpen: true, submenu: category });
       separateMenu();
     }
     for (const command of COMMANDS.filter(command => command.category === section && !['auto-save', 'rename'].includes(command.id))) {
@@ -951,11 +961,28 @@ document.addEventListener('compositionend', () => { compositionTarget = null; },
 document.addEventListener('keydown', event => {
   if (!workspace) return;
   if (document.querySelector('dialog[open]')) return;
-  const target = document.activeElement as HTMLElement | null;
+  let target = document.activeElement as HTMLElement | null;
   if (target?.matches('.inline-rename-input')) return;
   const menu = $('#menu');
   if (!menu.hidden) {
+    if (event.isComposing || compositionTarget || event.keyCode === 229) { hideMenu(true); return; }
     if (event.key === 'Tab') { hideMenu(true); return; }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (!toolbarMenu) return;
+      const section = menu.getAttribute('aria-label');
+      const submenu = target?.dataset.menuSection;
+      if (event.key === 'ArrowRight' && submenu) { openToolbarMenu(toolbarMenu, true, submenu); return; }
+      if (event.key === 'ArrowLeft' && section !== toolbarMenu.dataset.toolbarMenu) {
+        openToolbarMenu(toolbarMenu, true);
+        menu.querySelector<HTMLElement>(`[data-menu-section="${section}"]`)?.focus();
+        return;
+      }
+      const triggers = [...document.querySelectorAll<HTMLButtonElement>('[data-toolbar-menu]')];
+      const next = triggers.indexOf(toolbarMenu) + (event.key === 'ArrowRight' ? 1 : -1);
+      openToolbarMenu(triggers[(next + triggers.length) % triggers.length], true);
+      return;
+    }
     if (['Escape', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
       event.preventDefault(); event.stopImmediatePropagation();
       if (event.key === 'Escape') { hideMenu(true); return; }
@@ -964,8 +991,18 @@ document.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') { if (index < 0) buttons[0]?.focus(); else buttons[index]?.click(); return; }
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : event.key === 'ArrowDown' ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
       buttons[(next + buttons.length) % buttons.length]?.focus();
-    } else hideMenu(true);
-    return;
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (event.key.length === 1) {
+        const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+        buttons.find(button => button.firstChild?.textContent?.trim().toLocaleLowerCase().startsWith(event.key.toLocaleLowerCase()))?.focus();
+      }
+      return;
+    }
+    hideMenu(true);
+    target = document.activeElement as HTMLElement | null;
   }
   const keyboardMenu = event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey;
   const file = target?.closest<HTMLElement>('[data-file-row]');
@@ -995,6 +1032,8 @@ document.addEventListener('keydown', event => {
     if ((!textField || target?.closest('#editor-stage')) && key.includes('+') && COMMANDS.some(c => Object.hasOwn(workspace.preferences.shortcuts ?? {}, c.id) && c.keys.includes(key))) { event.preventDefault(); event.stopImmediatePropagation(); }
     return;
   }
+  const nativeSelection = window.getSelection();
+  if (command.id === 'copy' && nativeSelection?.anchorNode && !nativeSelection.isCollapsed && !$('#editor-stage').contains(nativeSelection.anchorNode)) return;
   if (command.editor && textField) {
     if (target?.closest('#editor-stage') && ['undo', 'redo', 'cut', 'copy', 'paste', 'select-all'].includes(command.id)) { event.preventDefault(); event.stopImmediatePropagation(); if (command.id === 'paste') void bridge.paste(); else document.execCommand(command.id === 'select-all' ? 'selectAll' : command.id); }
     return;
@@ -1041,8 +1080,13 @@ sidebarResize.onpointerdown = event => {
   const start = event.clientX; const width = $('#sidebar').getBoundingClientRect().width; sidebarResize.setPointerCapture(event.pointerId); app.classList.add('resizing-sidebar');
   let next = width;
   const move = (event: PointerEvent) => { next = Math.round(Math.max(200, Math.min(420, innerWidth - 360, width + event.clientX - start))); document.documentElement.style.setProperty('--sidebar-width', `${next}px`); sidebarResize.setAttribute('aria-valuenow', String(next)); };
-  const finish = () => { sidebarResize.onpointermove = null; sidebarResize.onpointerup = null; sidebarResize.onpointercancel = null; resizingSidebar = false; app.classList.remove('resizing-sidebar'); void run(() => bridge.updatePreferences({ sidebarWidth: next })); };
-  sidebarResize.onpointermove = move; sidebarResize.onpointerup = finish; sidebarResize.onpointercancel = finish;
+  const finish = () => {
+    sidebarResize.onpointermove = null; sidebarResize.onpointerup = null; sidebarResize.onpointercancel = null; sidebarResize.onlostpointercapture = null;
+    if (sidebarResize.hasPointerCapture(event.pointerId)) sidebarResize.releasePointerCapture(event.pointerId);
+    resizingSidebar = false; app.classList.remove('resizing-sidebar');
+    void run(() => bridge.updatePreferences({ sidebarWidth: next }));
+  };
+  sidebarResize.onpointermove = move; sidebarResize.onpointerup = finish; sidebarResize.onpointercancel = finish; sidebarResize.onlostpointercapture = finish;
 };
 sidebarResize.onkeydown = event => {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault();

@@ -96,7 +96,16 @@ export class Settings {
     }
     this.get<HTMLButtonElement>('#code-theme-refresh').onclick = async () => { const button = this.get<HTMLButtonElement>('#code-theme-refresh'); button.disabled = true; try { await this.host.execute('code-refresh'); } finally { button.disabled = false; this.updateCodeTheme(); } };
     this.get('#settings-panel').addEventListener('scroll', () => this.hideHelp(), { passive: true });
-    this.get('#format-save-help').addEventListener('beforetoggle', event => { if ((event as ToggleEvent).newState === 'open') { const rect = this.get('#format-save-info').getBoundingClientRect(); const help = this.get('#format-save-help'); help.style.left = `${Math.min(rect.left, innerWidth - 300)}px`; help.style.top = `${rect.bottom + 8}px`; } });
+    this.get('#format-save-help').addEventListener('toggle', event => {
+      if ((event as ToggleEvent).newState !== 'open') return;
+      const rect = this.get('#format-save-info').getBoundingClientRect();
+      const help = this.get('#format-save-help');
+      const { width, height } = help.getBoundingClientRect();
+      const below = rect.bottom + 8;
+      const top = below + height <= innerHeight - 12 ? below : rect.top - height - 8;
+      help.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`;
+      help.style.top = `${Math.max(12, Math.min(top, innerHeight - height - 12))}px`;
+    });
   }
   private get<T extends HTMLElement>(selector: string) { return this.dialog.querySelector<T>(selector)!; }
   private async performUpdate() {
@@ -171,7 +180,7 @@ export class Settings {
   private focusKey(id: string) { (this.get<HTMLButtonElement>(`[data-shortcut-id="${id}"]`) ?? this.get('#shortcut-search')).focus(); }
   private restoreFocus() {
     if (this.contextDocument !== this.host.current().activeId) { this.host.focus(); return; }
-    if (this.origin?.isConnected && this.origin.closest('#editor-stage')) {
+    if (this.origin?.isConnected && !this.origin.closest('[hidden], [inert]')) {
       this.origin.focus({ preventScroll: true });
       if (this.cellSelection && this.origin.matches('th,td') && this.origin.firstChild) { const node = this.origin.firstChild; const range = document.createRange(); range.setStart(node, Math.min(node.textContent?.length ?? 0, this.cellSelection.from)); range.setEnd(node, Math.min(node.textContent?.length ?? 0, this.cellSelection.to)); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); return; }
       if (this.range && this.origin.closest('th,td') && this.range.startContainer.isConnected && this.range.endContainer.isConnected) { const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(this.range); }

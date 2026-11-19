@@ -49,6 +49,7 @@
 #update-status { margin: 6px 0 0; }
 #update-progress { width: 100%; height: 8px; margin-top: 8px; }
 #settings-about [data-settings-command='guide'] { margin-top: 16px; }
+#preferences :is(.about-version > span, #code-theme-status, #update-status, #shortcut-message) { user-select: text; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   #preferences { width: calc(100vw - 20px); height: calc(100vh - 28px); }
   .settings-tabs { padding-left: 12px; padding-right: 12px; }

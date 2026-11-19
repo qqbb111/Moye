@@ -161,6 +161,9 @@ export class DocumentStore {
         catch { if (!this.recoveryNotices.includes('部分草稿图片无法转换为附件，原始数据仍已保留。')) this.recoveryNotices.push('部分草稿图片无法转换为附件，原始数据仍已保留。'); }
       }
       this.documents.set(document.id, document);
+      const untitled = !document.path && /^未命名 (\d+)$/.exec(document.title);
+      const number = untitled ? Number(untitled[1]) : 0;
+      if (Number.isSafeInteger(number)) this.counter = Math.max(this.counter, number);
     }
     const owned = new Set<string>();
     for (const item of snapshot.windows) {
@@ -184,13 +187,15 @@ export class DocumentStore {
     this.documents.set(id, document); window.documentIds.push(id); window.activeId = id; this.changed(); return id;
   }
   async openFile(windowId: string, file: string) {
-    const existing = this.findByPath(file);
-    if (existing) { const owner = this.owner(existing.id); if (owner) return { id: existing.id, windowId: owner }; this.restore(windowId, existing.id); return { id: existing.id, windowId }; }
-    const bytes = await fs.readFile(file); const decoded = decode(bytes);
-    const id = this.newDocument(windowId, decoded.content, path.basename(file));
-    const document = this.documents.get(id)!;
-    Object.assign(document, decoded, { path: path.resolve(file), savedContent: decoded.content, diskHash: hash(bytes), savedRevision: 0, dirty: false, status: 'saved', savedAt: Date.now() });
-    this.touchRecent(file); this.changed(); return { id, windowId };
+    return this.queueWrite(`path:${pathKey(file)}`, async () => {
+      const existing = this.findByPath(file);
+      if (existing) { const owner = this.owner(existing.id); if (owner) return { id: existing.id, windowId: owner }; this.restore(windowId, existing.id); return { id: existing.id, windowId }; }
+      const bytes = await fs.readFile(file); const decoded = decode(bytes);
+      const id = this.newDocument(windowId, decoded.content, path.basename(file));
+      const document = this.documents.get(id)!;
+      Object.assign(document, decoded, { path: path.resolve(file), savedContent: decoded.content, diskHash: hash(bytes), savedRevision: 0, dirty: false, status: 'saved', savedAt: Date.now() });
+      this.touchRecent(file); this.changed(); return { id, windowId };
+    });
   }
   findByPath(file: string) { return [...this.documents.values()].find(doc => doc.path && pathKey(doc.path) === pathKey(file)); }
   async refreshFromDisk(id: string) {
@@ -220,44 +225,46 @@ export class DocumentStore {
     }
     this.changed(fromRenderer ? { windowId, documentId: id, revision } : undefined);
   }
-  private async writeDocument(id: string, operation: () => Promise<void>) {
-    const preceding = this.writes.get(id) ?? Promise.resolve();
+  private async queueWrite<T>(key: string, operation: () => Promise<T>) {
+    const preceding = this.writes.get(key) ?? Promise.resolve();
     const task = preceding.catch(() => {}).then(operation);
-    this.writes.set(id, task);
-    try { await task; } finally { if (this.writes.get(id) === task) this.writes.delete(id); }
+    this.writes.set(key, task);
+    try { return await task; } finally { if (this.writes.get(key) === task) this.writes.delete(key); }
   }
   async save(id: string, destination?: string, overwrite = false) {
-    await this.writeDocument(id, async () => {
+    await this.queueWrite(`document:${id}`, async () => {
       const document = this.documents.get(id); if (!document) throw new Error('文档已关闭');
       const target = destination ? path.resolve(destination) : document.path;
       if (!target) throw new Error('请先选择保存位置');
-      const duplicate = this.findByPath(target); if (duplicate && duplicate.id !== id) throw new Error('这个文件已在其他标签页打开，请选择不同的保存位置。');
-      const original = document.content; const revision = document.revision;
-      const samePath = document.path && pathKey(document.path) === pathKey(target);
-      document.status = 'saving'; this.onChanged();
-      try {
-        let disk: Buffer | null = null;
-        try { disk = await fs.readFile(target); } catch (error) { if (!missing(error)) throw error; }
-        if (samePath && !overwrite && (!disk || hash(disk) !== document.diskHash)) throw new FileConflictError();
-        if (samePath && disk) {
-          const backup = path.join(this.directory, 'backups', `${id}.md`);
-          try { await fs.writeFile(backup, disk, { flag: 'wx' }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      await this.queueWrite(`path:${pathKey(target)}`, async () => {
+        const duplicate = this.findByPath(target); if (duplicate && duplicate.id !== id) throw new Error('这个文件已在其他标签页打开，请选择不同的保存位置。');
+        const original = document.content; const revision = document.revision;
+        const samePath = document.path && pathKey(document.path) === pathKey(target);
+        document.status = 'saving'; this.onChanged();
+        try {
+          let disk: Buffer | null = null;
+          try { disk = await fs.readFile(target); } catch (error) { if (!missing(error)) throw error; }
+          if (samePath && !overwrite && (!disk || hash(disk) !== document.diskHash)) throw new FileConflictError();
+          if (samePath && disk) {
+            const backup = path.join(this.directory, 'backups', `${id}.md`);
+            try { await fs.writeFile(backup, disk, { flag: 'wx' }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+          }
+          let content = await this.images.materialize(original, target, document.path);
+          if (this.preferences.formatOnSave) content = applyEdits(content, tidyChineseMarkdown(content));
+          const output = Buffer.from((document.bom ? '\uFEFF' : '') + content.replace(/\r\n/g, '\n').replace(/\n/g, document.eol), 'utf8');
+          await atomicWrite(target, output);
+          document.path = target; document.title = path.basename(target); document.diskHash = hash(output);
+          if (document.revision === revision && document.content === original && content !== original) { document.content = content; document.revision++; }
+          document.savedContent = content; document.savedRevision = document.content === content ? document.revision : revision; document.savedAt = Date.now();
+          document.dirty = document.content !== content; document.status = document.dirty ? 'draft' : 'saved'; document.error = null;
+          if (document.dirty && this.preferences.autoSave && this.owner(id) && !this.autoTimers.has(id)) this.autoTimers.set(id, setTimeout(() => { this.autoTimers.delete(id); void this.save(id).catch(() => {}); }, this.delays.autoSave));
+          this.touchRecent(target); this.changed();
+        } catch (error) {
+          document.status = error instanceof FileConflictError ? 'conflict' : 'error';
+          document.error = error instanceof FileConflictError ? error.message : `保存失败：${(error as Error).message}`;
+          this.changed(); throw error;
         }
-        let content = await this.images.materialize(original, target, document.path);
-        if (this.preferences.formatOnSave) content = applyEdits(content, tidyChineseMarkdown(content));
-        const output = Buffer.from((document.bom ? '\uFEFF' : '') + content.replace(/\r\n/g, '\n').replace(/\n/g, document.eol), 'utf8');
-        await atomicWrite(target, output);
-        document.path = target; document.title = path.basename(target); document.diskHash = hash(output);
-        if (document.revision === revision && document.content === original && content !== original) { document.content = content; document.revision++; }
-        document.savedContent = content; document.savedRevision = document.content === content ? document.revision : revision; document.savedAt = Date.now();
-        document.dirty = document.content !== content; document.status = document.dirty ? 'draft' : 'saved'; document.error = null;
-        if (document.dirty && this.preferences.autoSave && this.owner(id) && !this.autoTimers.has(id)) this.autoTimers.set(id, setTimeout(() => { this.autoTimers.delete(id); void this.save(id).catch(() => {}); }, this.delays.autoSave));
-        this.touchRecent(target); this.changed();
-      } catch (error) {
-        document.status = error instanceof FileConflictError ? 'conflict' : 'error';
-        document.error = error instanceof FileConflictError ? error.message : `保存失败：${(error as Error).message}`;
-        this.changed(); throw error;
-      }
+      });
     });
   }
   accessibleDocument(windowId: string, id: string) {
@@ -268,7 +275,7 @@ export class DocumentStore {
   }
   async renameDocument(windowId: string, id: string, title: string) {
     const name = validDocumentName(title);
-    await this.writeDocument(id, async () => {
+    await this.queueWrite(`document:${id}`, async () => {
       const document = this.accessibleDocument(windowId, id);
       if (document.path) await this.renameFileOnDisk(document.path, name, document);
       else if (document.title !== name) { document.title = name; this.changed(); }
@@ -283,23 +290,27 @@ export class DocumentStore {
     const filename = documentExtension.test(name) ? name : name + path.extname(file);
     const target = path.join(path.dirname(file), validDocumentName(filename));
     if (file === target) return;
-    const duplicate = this.findByPath(target);
-    if (duplicate && duplicate !== document) throw new Error('同名文件已在墨页中打开');
-    await renameWithoutOverwrite(file, target);
-    if (document) { document.path = target; document.title = filename; }
-    this.recent = this.recent.map(item => pathKey(item) === pathKey(file) ? target : item);
-    this.changed();
+    await this.queueWrite(`path:${pathKey(target)}`, async () => {
+      const duplicate = this.findByPath(target);
+      if (duplicate && duplicate !== document) throw new Error('同名文件已在墨页中打开');
+      await renameWithoutOverwrite(file, target);
+      if (document) { document.path = target; document.title = filename; }
+      this.recent = this.recent.map(item => pathKey(item) === pathKey(file) ? target : item);
+      this.changed();
+    });
   }
   async saveFolderFileCopy(file: string, destination: string) {
     const target = path.resolve(destination);
     if (pathKey(file) === pathKey(target)) throw new Error('请选择不同的保存位置');
-    if (this.findByPath(target)) throw new Error('这个文件已在其他标签页打开，请选择不同的保存位置。');
-    const { content, eol, bom } = decode(await fs.readFile(file));
-    const materialized = await this.images.materialize(content, target, file);
-    const output = (bom ? '\uFEFF' : '') + materialized.replace(/\n/g, eol);
-    await atomicWrite(target, output);
-    this.touchRecent(target);
-    this.changed();
+    await this.queueWrite(`path:${pathKey(target)}`, async () => {
+      if (this.findByPath(target)) throw new Error('这个文件已在其他标签页打开，请选择不同的保存位置。');
+      const { content, eol, bom } = decode(await fs.readFile(file));
+      const materialized = await this.images.materialize(content, target, file);
+      const output = (bom ? '\uFEFF' : '') + materialized.replace(/\n/g, eol);
+      await atomicWrite(target, output);
+      this.touchRecent(target);
+      this.changed();
+    });
   }
   async organizeImages(windowId: string, id: string) {
     const document = this.requireDocument(windowId, id); const original = document.content; const revision = document.revision;
