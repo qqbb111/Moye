@@ -4,7 +4,7 @@ import { history, historyKeymap, defaultKeymap, indentWithTab, undo, redo, selec
 import { markdown, markdownLanguage, insertNewlineContinueMarkup, deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
+import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, getIndentUnit } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
@@ -529,6 +529,40 @@ export function wrapSelection(view: EditorView, left: string, right = left) {
   const selection = view.state.selection.main; const result = toggleMarkup(view.state.doc.toString(), selection.from, selection.to, left, right);
   view.dispatch({ changes: result.changes, selection: { anchor: result.anchor, head: result.head }, annotations: isolateHistory.of('full'), scrollIntoView: true }); view.focus();
 }
+function indentProse(view: EditorView, ast: MarkdownNode, outdent: boolean) {
+  const { state } = view;
+  if (state.field(sourceField) || state.readOnly || view.compositionStarted || state.field(compositionField)) return false;
+  const numbers = new Set<number>();
+  for (const range of state.selection.ranges) {
+    const last = !range.empty && state.doc.lineAt(range.to).from === range.to ? range.to - 1 : range.to;
+    for (let number = state.doc.lineAt(range.from).number; number <= state.doc.lineAt(last).number; number++) numbers.add(number);
+  }
+  const blocks = (ast.children ?? []).map(node => ({ node, first: state.doc.lineAt(startOf(node)).number, last: state.doc.lineAt(endOf(node)).number }));
+  const rows = [...numbers].sort((a, b) => a - b).map(number => state.doc.line(number));
+  let prose = false;
+  for (const row of rows) {
+    const block = blocks.find(block => block.first <= row.number && block.last >= row.number)?.node;
+    if (!block && !row.text.trim()) { if (rows.length === 1) prose = true; continue; }
+    if (!block || block.type !== 'paragraph' || /^\[toc\]$/i.test(state.sliceDoc(startOf(block), endOf(block)).trim()) || (block.children?.length === 1 && block.children[0].type === 'image')) return false;
+    prose = true;
+  }
+  if (!prose || (outdent && !rows.some(row => row.text.startsWith('\u00a0')))) return false;
+  const size = getIndentUnit(state);
+  const changes: Array<{ from: number; to?: number; insert?: string }> = [];
+  for (const row of rows) {
+    if (outdent) {
+      const prefix = /^[ \u00a0]+/.exec(row.text)?.[0] ?? '';
+      if (prefix) changes.push({ from: row.from, to: row.from + Math.min(size, prefix.length) });
+    } else if (row.text.trim() || rows.length === 1) {
+      // NBSP keeps the existing space width and survives Markdown/HTML export
+      // without turning ordinary prose into a four-space code block.
+      changes.push({ from: row.from, insert: '\u00a0'.repeat(size) });
+    }
+  }
+  const mapping = state.changes(changes);
+  view.dispatch({ changes: mapping, selection: state.selection.map(mapping, 1), userEvent: outdent ? 'delete.dedent' : 'input.indent' });
+  return true;
+}
 export function setBlock(view: EditorView, prefix: string) {
   const selection = view.state.selection.main; const changes: Array<{ from: number; to: number; insert: string }> = [];
   const start = view.state.doc.lineAt(selection.from).number; const end = view.state.doc.lineAt(!selection.empty && view.state.doc.lineAt(selection.to).from === selection.to ? selection.to - 1 : selection.to).number;
@@ -763,6 +797,7 @@ export class MarkdownEditor {
       return [transaction, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
     });
     const bindings: import('@codemirror/view').KeyBinding[] = [];
+    bindings.push({ key: 'Tab', run: view => indentProse(view, view.state.field(preview).ast, false), shift: view => indentProse(view, view.state.field(preview).ast, true) });
     bindings.push({ key: 'Home', run: view => moveToOrderedBoundary(view, 'Home') });
     bindings.push({ key: 'ArrowLeft', run: view => moveToOrderedBoundary(view, 'ArrowLeft') });
     bindings.push({ key: 'Backspace', preventDefault: false, run(view) {

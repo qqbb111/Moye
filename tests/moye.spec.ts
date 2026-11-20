@@ -1288,6 +1288,74 @@ test('原文保真、光标语法显隐、排版和真实快捷键', async () =>
   } finally { await application.close(); }
 });
 
+test('正文连续 Tab 缩进保留加粗，反向缩进、撤销及 HTML 导出保持一致', async ({}, testInfo) => {
+  const { application, page, directory } = await launch();
+  try {
+    const raw = '这是一段普通正文，包含用于验证换行的示例文字。调整首行缩进时，**加粗的中文和 English 文本**仍应保持加粗，其余文字按照原来的宽度继续换行。\n\n下一段正文。';
+    const position = raw.indexOf('\n\n');
+    await setContent(page, raw);
+    await page.evaluate(anchor => {
+      const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor } }); editor.focus();
+    }, position);
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+    await expect(current(page).locator('.md-strong')).toHaveText('加粗的中文和 English 文本');
+    expect(await content(page)).toBe('\u00a0'.repeat(4) + raw);
+    expect(await page.evaluate(() => (window as any).__editor.active().view.state.selection.main.head)).toBe(position + 4);
+    const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 960, height: 800 }); window.show(); window.focus(); });
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const png = await native.evaluate(async window => (await window.capturePage(undefined, { stayAwake: true })).toPNG().toString('base64'));
+    await fs.writeFile(testInfo.outputPath('prose-tab.png'), Buffer.from(png, 'base64'));
+    const file = path.join(directory, '正文缩进.html');
+    await chooseSave(application, file); await execute(page, 'export-html');
+    await expect.poll(() => fs.readFile(file, 'utf8').catch(() => '')).toContain('<strong>加粗的中文和 English 文本</strong>');
+    const exported = await page.evaluate(html => new DOMParser().parseFromString(html, 'text/html').querySelector('p')!.textContent, await fs.readFile(file, 'utf8'));
+    expect(exported).toBe('\u00a0'.repeat(4) + raw.slice(0, position).replace(/\*\*/g, ''));
+    await page.evaluate(() => (window as any).__editor.active().focus());
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe(raw);
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Control+z'); expect(await content(page)).toBe(raw);
+    await page.keyboard.press('Control+Shift+z'); expect(await content(page)).toBe('\u00a0'.repeat(2) + raw);
+  } finally { await application.close(); }
+});
+
+test('正文多段缩进保留空行，源码、列表和代码块沿用原 Tab 行为', async () => {
+  const { application, page } = await launch();
+  const select = (anchor: number, head = anchor) => page.evaluate(({ anchor, head }) => {
+    const editor = (window as any).__editor.active(); editor.view.dispatch({ selection: { anchor, head } }); editor.focus();
+  }, { anchor, head });
+  try {
+    const raw = '第一段 **加粗**。\n\n第二段 *斜体*。';
+    await setContent(page, raw); await select(0, raw.length);
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+    expect(await content(page)).toBe('\u00a0'.repeat(4) + raw.replace('\n\n', '\n\n' + '\u00a0'.repeat(4)));
+    await expect(current(page).locator('.md-strong')).toHaveText('加粗');
+    await expect(current(page).locator('.md-em')).toHaveText('斜体');
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe(raw);
+
+    await setContent(page, ''); await select(0);
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.insertText('新段落 **加粗**。');
+    expect(await content(page)).toBe('\u00a0'.repeat(4) + '新段落 **加粗**。');
+    await expect(current(page).locator('.md-strong')).toHaveText('加粗');
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe('新段落 **加粗**。');
+
+    await execute(page, 'toggle-source'); await setContent(page, '正文 **加粗**。'); await select(0);
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); expect(await content(page)).toBe('    正文 **加粗**。');
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe('正文 **加粗**。');
+    await execute(page, 'toggle-source');
+
+    const list = '1. 父级\n1. 子级 **加粗**';
+    await setContent(page, list); await select(list.length);
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); expect(await content(page)).toBe('1. 父级\n    1. 子级 **加粗**');
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe(list);
+
+    const code = '```cpp\nint value = 42;\n```';
+    await setContent(page, code); await current(page).locator('.code-content .cm-content').focus();
+    await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); expect(await content(page)).toBe('```cpp\n    int value = 42;\n```');
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); expect(await content(page)).toBe(code);
+  } finally { await application.close(); }
+});
+
 test('图片及块组件之后点击正文按实际坐标定位，滚动和主题切换后仍可编辑中间', async () => {
   const { application, page } = await launch();
   try {
