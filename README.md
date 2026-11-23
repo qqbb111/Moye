@@ -71,14 +71,14 @@
 
 笔记保存在本机，不需要注册账号。保存后的 `.md` 文件位于你选择的文件夹，可以继续用其他 Markdown 工具打开。
 
-草稿恢复目录：<code>%APPDATA%\Moye\recovery</code>
+草稿、标签和设置的恢复目录：<code>%APPDATA%\Moye\recovery</code>
 
 <table>
   <thead><tr><th align="left" nowrap>内容</th><th align="left" width="1000">恢复目录内的位置</th></tr></thead>
   <tbody>
-    <tr><td nowrap>草稿、标签和设置</td><td><code>workspace.json</code></td></tr>
-    <tr><td nowrap>有效备份</td><td><code>workspace.json.bak</code></td></tr>
-    <tr><td nowrap>草稿图片</td><td><code>assets</code></td></tr>
+    <tr><td nowrap>记录</td><td><code>workspace.json</code></td></tr>
+    <tr><td nowrap>备份</td><td><code>workspace.json.bak</code></td></tr>
+    <tr><td nowrap>图片</td><td><code>assets</code></td></tr>
   </tbody>
 </table>
 
