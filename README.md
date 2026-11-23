@@ -17,8 +17,6 @@
 
 ![透明主题实际桌面截图，墨页笔记后方的参考资料依然可见](docs/preview-transparent.png)
 
-透明主题已加入主分支，可从源码体验。当前 GitHub Release 的便携包暂未包含该主题。
-
 ## 开始使用
 
 1. 在 [Releases](https://github.com/qqbb111/Moye/releases/latest) 下载 `Moye-…-windows-x64.zip`，完整解压后双击目录里的 **`Moye.exe`**。运行环境和字体已随包提供。
