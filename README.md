@@ -35,13 +35,16 @@
 
 导出 PDF 时使用独立的纸张排版，编辑器中的深色主题也可以输出为白底黑字。适合打印算法竞赛模板、课程笔记和技术速查资料。
 
-| 打印选项 | 可选设置 |
-| --- | --- |
-| 纸张与版式 | A4 纵向单栏、A4 横向双栏 |
-| 代码配色 | 黑白省墨、浅色语法高亮 |
-| 代码字号 | 8–12 pt，单栏和双栏分别记住设置 |
-| 代码行号 | 按需显示或隐藏 |
-| 页脚 | 文档名、当前页与总页数 |
+<table>
+  <thead><tr><th align="left" nowrap>打印选项</th><th align="left" width="100%">可选设置</th></tr></thead>
+  <tbody>
+    <tr><td nowrap>纸张与版式</td><td>A4 纵向单栏、A4 横向双栏</td></tr>
+    <tr><td nowrap>代码配色</td><td>黑白省墨、浅色语法高亮</td></tr>
+    <tr><td nowrap>代码字号</td><td>8–12 pt，单栏和双栏分别记住设置</td></tr>
+    <tr><td nowrap>代码行号</td><td>按需显示或隐藏</td></tr>
+    <tr><td nowrap>页脚</td><td>文档名、当前页与总页数</td></tr>
+  </tbody>
+</table>
 
 长代码支持按行跨页，长行自动折行；在预览中确认页面后，保存的就是当前预览对应的 PDF。无法加载的图片会在原位置显示占位，其他内容可以继续导出。笔记也支持导出为 HTML，方便用浏览器查看和分享。
 
@@ -66,14 +69,18 @@
 
 ## 文件、图片与草稿
 
-笔记保存在本机，不需要注册账号。保存后的 `.md` 文件可以继续用其他 Markdown 工具打开，文件夹也由自己管理。
+笔记保存在本机，不需要注册账号。保存后的 `.md` 文件位于你选择的文件夹，可以继续用其他 Markdown 工具打开。
 
-| 内容 | 保存位置 |
-| --- | --- |
-| 已保存的笔记 | 你选择的文件夹 |
-| 草稿、标签和偏好设置 | `%APPDATA%\Moye\recovery\workspace.json` |
-| 上一份有效恢复记录 | 同目录的 `workspace.json.bak` |
-| 未随文档保存的图片附件 | `%APPDATA%\Moye\recovery\assets` |
+草稿恢复目录：<code>%APPDATA%\Moye\recovery</code>
+
+<table>
+  <thead><tr><th align="left" nowrap>内容</th><th align="left" width="100%">恢复目录内的位置</th></tr></thead>
+  <tbody>
+    <tr><td nowrap>草稿、标签和设置</td><td><code>workspace.json</code></td></tr>
+    <tr><td nowrap>有效备份</td><td><code>workspace.json.bak</code></td></tr>
+    <tr><td nowrap>草稿图片</td><td><code>assets</code></td></tr>
+  </tbody>
+</table>
 
 粘贴或插入的图片作为附件管理，保存和另存为时携带资源。已有相对图片从文档目录及其子目录加载，目录外的图片可通过「插入图片」复制为附件。
 
@@ -81,14 +88,17 @@
 
 ## 常用快捷键
 
-| 操作 | 默认快捷键 |
-| --- | --- |
-| 切换源码与排版 | `Ctrl+/` |
-| 快速打开文档 | `Ctrl+P` |
-| 插入表格 | `Ctrl+T` |
-| 插入代码块 | `Ctrl+Shift+K` |
-| 整理中文排版 | `Alt+Shift+F` |
-| 打开设置 | `Ctrl+,` |
+<table>
+  <thead><tr><th align="left" nowrap>操作</th><th align="left" width="100%">默认快捷键</th></tr></thead>
+  <tbody>
+    <tr><td nowrap>切换源码与排版</td><td><code>Ctrl+/</code></td></tr>
+    <tr><td nowrap>快速打开文档</td><td><code>Ctrl+P</code></td></tr>
+    <tr><td nowrap>插入表格</td><td><code>Ctrl+T</code></td></tr>
+    <tr><td nowrap>插入代码块</td><td><code>Ctrl+Shift+K</code></td></tr>
+    <tr><td nowrap>整理中文排版</td><td><code>Alt+Shift+F</code></td></tr>
+    <tr><td nowrap>打开设置</td><td><code>Ctrl+,</code></td></tr>
+  </tbody>
+</table>
 
 更多操作与按键可在「设置 → 快捷键」中搜索和修改。
 

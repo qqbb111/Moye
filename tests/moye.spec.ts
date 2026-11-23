@@ -775,6 +775,23 @@ test('源码与排版切换跟随当前阅读位置，光标在屏幕外也不�
 
 test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住版式字号，编辑主题和原文不变', async () => {
   const { application, page, directory } = await launch(); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const watchClose = async (token: string | null) => page.evaluate(token => {
+    const dialog = document.querySelector<HTMLDialogElement>('#print-preview')!;
+    (window as any).__pdfCloseProbe = new Promise(resolve => {
+      const observer = new MutationObserver(() => {
+        if (dialog.open) return;
+        observer.disconnect();
+        const previewId = dialog.dataset.previewId ?? null;
+        // This microtask runs before the native dialog's queued close event.
+        void window.moye.savePdf(token!).then(result => resolve({ previewId, result }));
+      });
+      observer.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+    });
+  }, token);
+  const expectRevoked = async () => {
+    const closed = await page.evaluate(() => (window as any).__pdfCloseProbe);
+    expect(closed.previewId).toBeNull(); expect(closed.result.ok).toBe(false);
+  };
   try {
     const native = await application.browserWindow(page); await native.evaluate(window => { window.setBounds({ width: 1250, height: 900 }); window.showInactive(); });
     const raw = '# 打印检查\n\n## 长代码\n\n```cpp\n' + Array.from({ length: 180 }, (_, i) => i === 49 ? '' : `    int code_${String(i).padStart(4, '0')} = ${i}; // PRINT_${String(i).padStart(4, '0')} 中文注释${i === 60 ? ' long_identifier_'.repeat(16) : ''}`).join('\n') + '\n```\n\n| 算法 | 复杂度 |\n| --- | --- |\n| BFS | O(n+m) |\n\n$$a^2+b^2=c^2$$\n\nPRINT_END';
@@ -789,15 +806,55 @@ test('打印预览用实际 PDF 离线显示，保存字节一致并独立记住
     await page.locator('#print-zoom').selectOption('0.75'); await expect(page.locator('#print-pages canvas[data-ready=true]').first()).toBeVisible(); await page.locator('#print-zoom').selectOption('fit');
     const token = await page.locator('#print-preview').getAttribute('data-preview-id');
     const bytes = await application.evaluate((_electron, token) => { const api = (globalThis as any).__moyeTest; return [...api.pdfPreviews.get([...api.windows.keys()][0], token).bytes]; }, token);
-    const destination = path.join(directory, 'print-preview.pdf'); await chooseSave(application, destination); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible();
+    const destination = path.join(directory, 'print-preview.pdf'); await chooseSave(application, destination); await watchClose(token); await page.locator('#print-save').click(); await expect(page.locator('#print-preview')).not.toBeVisible(); await expectRevoked();
     expect(Buffer.from(await fs.readFile(destination)).equals(Buffer.from(bytes))).toBe(true); expect(await content(page)).toBe(raw); await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await execute(page, 'export-pdf'); await expect(page.locator('#print-layout')).toHaveValue('landscape-two-column'); await expect(page.locator('#print-font')).toHaveValue('9.5'); await expect(page.locator('#print-lines')).not.toBeChecked();
     await page.locator('#print-layout').selectOption('portrait'); await expect(page.locator('#print-font')).toHaveValue('10.5');
     await page.evaluate(() => (window as any).__editor.setContent('# 原文已更新')); await expect(page.locator('#print-stale')).toBeVisible();
     await page.locator('#print-refresh').click(); await expect(page.locator('#print-stale')).toBeHidden(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
-    const closedToken = await page.locator('#print-preview').getAttribute('data-preview-id'); await page.keyboard.press('Escape'); await expect(page.locator('#print-preview')).not.toBeVisible();
-    const result = await page.evaluate(token => window.moye.savePdf(token!), closedToken); expect(result.ok).toBe(false);
+    const closedToken = await page.locator('#print-preview').getAttribute('data-preview-id'); await watchClose(closedToken); await page.keyboard.press('Escape'); await expect(page.locator('#print-preview')).not.toBeVisible(); await expectRevoked();
+    await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    const buttonToken = await page.locator('#print-preview').getAttribute('data-preview-id'); await watchClose(buttonToken);
+    await page.evaluate(async () => { document.querySelector<HTMLButtonElement>('#print-close')!.click(); await (window as any).__editor.execute('export-pdf'); });
+    await expectRevoked(); await expect(page.locator('#print-preview')).toBeVisible(); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+    const reopenedToken = await page.locator('#print-preview').getAttribute('data-preview-id'); expect(reopenedToken).not.toBe(buttonToken);
+    expect(await application.evaluate((_electron, token) => { const api = (globalThis as any).__moyeTest; return api.pdfPreviews.get([...api.windows.keys()][0], token).id; }, reopenedToken)).toBe(reopenedToken);
     expect(errors).toEqual([]);
+  } finally { await application.close(); }
+});
+
+test('PDF 保存结果只更新原预览，旧成功、取消、错误和异常不影响重开的窗口', async () => {
+  const { application, page } = await launch();
+  try {
+    await setContent(page, '# 保存会话\n\nPDF_SAVE_SESSION');
+    await application.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('pdf:save');
+      ipcMain.handle('pdf:save', () => new Promise((resolve, reject) => { (globalThis as any).__pendingPdfSave = { resolve, reject }; }));
+    });
+    for (const outcome of ['success', 'canceled', 'error', 'rejection'] as const) {
+      await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+      const oldToken = await page.locator('#print-preview').getAttribute('data-preview-id');
+      await page.locator('#print-save').click();
+      await expect.poll(() => application.evaluate(() => !!(globalThis as any).__pendingPdfSave)).toBe(true);
+      await page.locator('#print-close').click(); await expect(page.locator('#print-preview')).toBeHidden();
+      await execute(page, 'export-pdf'); await expect(page.locator('#print-save')).toBeEnabled({ timeout: 30000 });
+      expect(await page.locator('#print-preview').getAttribute('data-preview-id')).not.toBe(oldToken);
+      // Invalid input keeps this new session disabled independently of timing.
+      await page.locator('#print-font').fill(''); await expect(page.locator('#print-save')).toBeDisabled();
+      const validation = '字号范围为 8–12pt，步长 0.5pt'; await expect(page.locator('#print-status')).toHaveText(validation);
+      await application.evaluate((_electron, outcome) => {
+        const pending = (globalThis as any).__pendingPdfSave; delete (globalThis as any).__pendingPdfSave;
+        if (outcome === 'rejection') pending.reject(new Error('旧保存异常'));
+        else pending.resolve(outcome === 'success' ? { ok: true } : outcome === 'canceled' ? { ok: false, canceled: true } : { ok: false, message: '旧保存失败' });
+      }, outcome);
+      // Complete a later IPC round trip and rendering frame after the old reply.
+      await page.evaluate(async () => { await window.moye.bootstrap(); await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+      await expect(page.locator('#print-preview'), outcome).toBeVisible();
+      await expect(page.locator('#print-save'), outcome).toBeDisabled();
+      await expect(page.locator('#print-status'), outcome).toHaveText(validation);
+      await expect(page.locator('#print-font'), outcome).toHaveValue('');
+      await page.locator('#print-close').click(); await expect(page.locator('#print-preview')).toBeHidden();
+    }
   } finally { await application.close(); }
 });
 

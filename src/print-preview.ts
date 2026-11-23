@@ -38,7 +38,8 @@ export class PrintPreview {
         if (visible && !request.final) this.get('#print-page-count').textContent = '首页预览';
       }).catch(() => {});
     });
-    this.get<HTMLButtonElement>('#print-close').onclick = () => this.dialog.close();
+    this.get<HTMLButtonElement>('#print-close').onclick = () => this.close();
+    this.dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
     this.get('#print-layout').onchange = () => {
       this.rememberFont(); this.lastLayout = this.get<HTMLSelectElement>('#print-layout').value as PrintLayout;
       this.get<HTMLInputElement>('#print-font').value = String(this.preferences.fonts[this.lastLayout]); this.schedule();
@@ -49,15 +50,11 @@ export class PrintPreview {
     new ResizeObserver(() => { const width = this.get('#print-pages').clientWidth; if (width === previousWidth) return; previousWidth = width; clearTimeout(resizeTimer); if (this.dialog.open && this.pdf && !this.get<HTMLButtonElement>('#print-save').disabled && this.get<HTMLSelectElement>('#print-zoom').value === 'fit') resizeTimer = setTimeout(() => void this.paintPages(), 100); }).observe(this.get('#print-pages'));
     this.get('#print-refresh').onclick = () => { const next = this.read(this.snapshot.id); if (next) { this.snapshot = { ...next }; this.observe(next); this.get('#print-document').textContent = next.title; this.schedule(0); } };
     this.get('#print-save').onclick = () => void this.save();
-    this.dialog.addEventListener('close', () => {
-      if (this.dialog.open) return;
-      const returnFocus = this.returnFocus; this.returnFocus = undefined;
-      this.dispose(); returnFocus?.();
-    });
+    this.dialog.addEventListener('close', () => { if (!this.dialog.open && this.worker) this.close(); });
   }
   private get<T extends HTMLElement = HTMLElement>(selector: string) { return this.dialog.querySelector<T>(selector)!; }
   open(document: DocumentView, preferences?: PrintPreferences, returnFocus?: () => void) {
-    if (this.dialog.open) { this.returnFocus = undefined; this.dialog.close(); this.dispose(); }
+    if (this.worker) { this.returnFocus = undefined; this.close(); }
     this.returnFocus = returnFocus;
     this.snapshot = { ...document }; this.preferences = printPreferences(preferences); const options = optionsFromPreferences(this.preferences); this.lastLayout = options.layout;
     this.get<HTMLSelectElement>('#print-layout').value = options.layout; this.get<HTMLSelectElement>('#print-color').value = options.color;
@@ -130,6 +127,12 @@ export class PrintPreview {
     this.pdf = pdf; return await this.paintPages() && generation === this.generation && this.dialog.open;
   }
   private finishBusy() { this.get('#print-busy').hidden = true; this.get('#print-save').textContent = '保存 PDF…'; }
+  private close() {
+    const returnFocus = this.returnFocus; this.returnFocus = undefined;
+    // Native dialog.close() queues its close event after the dialog is hidden.
+    // Revoke the preview before that boundary so old tokens cannot still save.
+    this.dispose(); this.dialog.close(); returnFocus?.();
+  }
   private dispose() { this.generation++; clearTimeout(this.timer); this.request?.abort.abort(); this.clearPdf(); this.worker?.destroy(); this.worker = undefined; this.request = undefined; this.id = ''; delete this.dialog.dataset.previewId; void window.moye.releasePdf(); }
   private clearPdf(preservePages = false) {
     this.paintGeneration++;
@@ -230,8 +233,17 @@ export class PrintPreview {
   }
   private async save() {
     if (!this.id || this.get<HTMLButtonElement>('#print-save').disabled) return;
+    const id = this.id, generation = this.generation;
+    const current = () => this.dialog.open && this.generation === generation && this.id === id;
     this.get<HTMLButtonElement>('#print-save').disabled = true;
-    try { const result = await window.moye.savePdf(this.id, { ...this.preferences.fonts }); if (result.ok) this.dialog.close(); else { this.get<HTMLButtonElement>('#print-save').disabled = false; if (!result.canceled) this.message(result.message ?? '无法保存 PDF'); } }
-    catch (error) { this.message((error as Error).message); this.get<HTMLButtonElement>('#print-save').disabled = false; }
+    try {
+      const result = await window.moye.savePdf(id, { ...this.preferences.fonts });
+      if (!current()) return;
+      if (result.ok) this.close();
+      else { this.get<HTMLButtonElement>('#print-save').disabled = false; if (!result.canceled) this.message(result.message ?? '无法保存 PDF'); }
+    } catch (error) {
+      if (!current()) return;
+      this.message((error as Error).message); this.get<HTMLButtonElement>('#print-save').disabled = false;
+    }
   }
 }
