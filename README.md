@@ -36,7 +36,7 @@
 导出 PDF 时使用独立的纸张排版，编辑器中的深色主题也可以输出为白底黑字。适合打印算法竞赛模板、课程笔记和技术速查资料。
 
 <table>
-  <thead><tr><th align="left" nowrap>打印选项</th><th align="left" width="100%">可选设置</th></tr></thead>
+  <thead><tr><th align="left" nowrap>打印选项</th><th align="left" width="1000">可选设置</th></tr></thead>
   <tbody>
     <tr><td nowrap>纸张与版式</td><td>A4 纵向单栏、A4 横向双栏</td></tr>
     <tr><td nowrap>代码配色</td><td>黑白省墨、浅色语法高亮</td></tr>
@@ -74,7 +74,7 @@
 草稿恢复目录：<code>%APPDATA%\Moye\recovery</code>
 
 <table>
-  <thead><tr><th align="left" nowrap>内容</th><th align="left" width="100%">恢复目录内的位置</th></tr></thead>
+  <thead><tr><th align="left" nowrap>内容</th><th align="left" width="1000">恢复目录内的位置</th></tr></thead>
   <tbody>
     <tr><td nowrap>草稿、标签和设置</td><td><code>workspace.json</code></td></tr>
     <tr><td nowrap>有效备份</td><td><code>workspace.json.bak</code></td></tr>
@@ -89,7 +89,7 @@
 ## 常用快捷键
 
 <table>
-  <thead><tr><th align="left" nowrap>操作</th><th align="left" width="100%">默认快捷键</th></tr></thead>
+  <thead><tr><th align="left" nowrap>操作</th><th align="left" width="1000">默认快捷键</th></tr></thead>
   <tbody>
     <tr><td nowrap>切换源码与排版</td><td><code>Ctrl+/</code></td></tr>
     <tr><td nowrap>快速打开文档</td><td><code>Ctrl+P</code></td></tr>
