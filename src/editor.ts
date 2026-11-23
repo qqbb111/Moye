@@ -13,7 +13,7 @@ import { vscodeHighlightStyle } from './code-highlighting';
 import { attachGithubHighlighting, githubTokens, tokenizeGithub } from './github-highlighting';
 import { copyIcon, checkIcon } from './code-icons';
 import { icon, type IconName } from './icons';
-import { textEdits, toggleMarkup, tidyChineseMarkdown } from '../shared/markdown-tools';
+import { textEdits, toggleMarkup, clearMarkup, tidyChineseMarkdown } from '../shared/markdown-tools';
 
 const sourceEffect = StateEffect.define<boolean>();
 const compositionEffect = StateEffect.define<boolean>();
@@ -40,6 +40,34 @@ const paragraphBreaks = StateField.define<readonly ParagraphBreak[]>({
   provide: field => invertedEffects.of(transaction => transaction.docChanged && (transaction.startState.field(field).length !== transaction.state.field(field).length || transaction.effects.some(effect => effect.is(paragraphBreakEffect) || effect.is(restoreParagraphBreaks)))
     ? [restoreParagraphBreaks.of(transaction.startState.field(field))] : []),
 });
+type CellCursor = { from: number; row: number; column: number; anchor: number; head: number; value: string };
+const tableEditEffect = StateEffect.define<{ before: CellCursor; after: CellCursor }>({ map(value, changes) {
+  const map = (cursor: CellCursor) => ({ ...cursor, from: changes.mapPos(cursor.from, -1) });
+  return { before: map(value.before), after: map(value.after) };
+} });
+const tableCursor = StateField.define<CellCursor | null>({
+  create: () => null,
+  update(value, transaction) {
+    let cursor = transaction.docChanged ? null : value;
+    for (const effect of transaction.effects) if (effect.is(tableEditEffect)) cursor = effect.value.after;
+    return cursor;
+  },
+  provide: () => invertedEffects.of(transaction => transaction.effects.filter(effect => effect.is(tableEditEffect)).reverse().map(effect => tableEditEffect.of({ before: effect.value.after, after: effect.value.before }))),
+});
+
+function nativeSelection(field: HTMLElement) {
+  const selection = window.getSelection();
+  const offset = (node: Node | null, at: number) => {
+    if (!node || !field.contains(node)) return 0;
+    const range = document.createRange(); range.selectNodeContents(field); range.setEnd(node, at); return range.toString().length;
+  };
+  return { anchor: offset(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0), head: offset(selection?.focusNode ?? null, selection?.focusOffset ?? 0) };
+}
+function restoreNativeSelection(field: HTMLElement, anchor: number, head: number) {
+  if (!field.firstChild) field.append(document.createTextNode(''));
+  const node = field.firstChild!, length = node.textContent?.length ?? 0;
+  window.getSelection()?.setBaseAndExtent(node, Math.max(0, Math.min(length, anchor)), node, Math.max(0, Math.min(length, head)));
+}
 const emoji: Record<string, string> = { smile: '😄', smiling: '😊', grin: '😁', laughing: '😆', joy: '😂', heart: '❤️', blush: '😊', wink: '😉', cry: '😢', sob: '😭', angry: '😠', thinking: '🤔', thinking_face: '🤔', sunglasses: '😎', star: '⭐', sparkles: '✨', fire: '🔥', rocket: '🚀', tada: '🎉', warning: '⚠️', check: '✅', white_check_mark: '✅', x: '❌', thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎', clap: '👏', pray: '🙏', eyes: '👀', memo: '📝', book: '📖', bulb: '💡', computer: '💻', bug: '🐛', coffee: '☕', apple: '🍎', penguin: '🐧', cat: '🐱', dog: '🐶', flag_cn: '🇨🇳', cn: '🇨🇳', ok_hand: '👌', muscle: '💪', 100: '💯' };
 function completeEmoji(context: CompletionContext) {
   const match = context.matchBefore(/:[a-z_0-9+-]*/); if (!match || (!context.explicit && match.text.length < 2)) return null;
@@ -162,8 +190,9 @@ function focusEmbedded(view: EditorView, position: number) {
   if (!focus()) requestAnimationFrame(focus);
 }
 function enterAfter(view: EditorView, to: number) {
-  const end = view.state.doc.length; const insert = to === end ? '\n\n' : '';
-  view.dispatch({ changes: insert ? { from: end, insert } : undefined, selection: { anchor: Math.min(to + 1, end + insert.length) }, scrollIntoView: true }); view.focus();
+  const suffix = view.state.sliceDoc(to), existing = /^\n*/.exec(suffix)![0].length;
+  const insert = '\n'.repeat(Math.max(0, (suffix.length > existing ? 4 : 2) - existing));
+  view.dispatch({ changes: insert ? { from: to, insert } : undefined, selection: { anchor: to + 2 }, annotations: isolateHistory.of('full'), scrollIntoView: true }); view.focus();
 }
 export function renderNode(node: MarkdownNode, host: Host): Node {
   if (node.type === 'text') { const text = node.value ?? ''; if (!/==[^=\n]+==/.test(text)) return document.createTextNode(text); const fragment = document.createDocumentFragment(); let previous = 0; for (const match of text.matchAll(/==([^=\n]+)==/g)) { fragment.append(document.createTextNode(text.slice(previous, match.index))); const mark = document.createElement('mark'); mark.className = 'md-highlight'; mark.textContent = match[1]; fragment.append(mark); previous = match.index! + match[0].length; } fragment.append(document.createTextNode(text.slice(previous))); return fragment; }
@@ -312,9 +341,12 @@ class BlockWidget extends WidgetType {
     let rows = tableRows(this.context.source);
     let align = this.context.node.align ?? [];
     let currentRow = Math.min(1, rows.length - 1), currentCol = 0;
-    const commit = (isolated = false) => {
+    let beforeInput: CellCursor | undefined, appliedCursor: CellCursor | null = null;
+    const cursor = (cell: HTMLElement): CellCursor => ({ from: ((root as any).context as Context).from, row: Number(cell.dataset.row), column: Number(cell.dataset.col), ...nativeSelection(cell), value: cell.textContent ?? '' });
+    const commit = (isolated = false, edit?: { before: CellCursor; after: CellCursor }) => {
       const ctx: Context = (root as any).context;
-      outer.dispatch({ changes: { from: ctx.from, to: ctx.to, insert: serializeTable(rows, align) }, annotations: isolated ? isolateHistory.of('full') : undefined });
+      const changes = textEdits(ctx.source, serializeTable(rows, align)).map(change => ({ ...change, from: change.from + ctx.from, to: change.to + ctx.from }));
+      if (changes.length) outer.dispatch({ changes, effects: edit ? tableEditEffect.of(edit) : [], annotations: isolated ? isolateHistory.of('full') : undefined });
     };
     const group = () => {
       const element = document.createElement('div'); element.className = 'table-tool-group';
@@ -350,7 +382,11 @@ class BlockWidget extends WidgetType {
     }, 'remove', '列');
     const alignment = group();
     const alignButtons = ([['左', '左对齐', 'left'], ['中', '居中对齐', 'center'], ['右', '右对齐', 'right']] as const).map(([text, label, value]) => ({
-      value, button: action(alignment, label, `当前列${label}`, () => { align[currentCol] = value; commit(true); }, undefined, text),
+      value, button: action(alignment, label, `当前列${label}`, () => {
+        const cell = document.activeElement as HTMLElement;
+        const before = root.contains(cell) && cell.matches('th[contenteditable=true],td[contenteditable=true]') ? cursor(cell) : undefined;
+        align[currentCol] = value; commit(true, before ? { before, after: { ...before } } : undefined);
+      }, undefined, text),
     }));
     const updateToolbar = () => {
       removeRow.disabled = currentRow === 0 || rows.length <= 2;
@@ -363,8 +399,11 @@ class BlockWidget extends WidgetType {
         const ast = parseMarkdown(value); appendChildren(cell, ast.children?.[0]?.children ?? [], this.context.host);
         cell.onfocus = () => { currentRow = index; currentCol = col; updateToolbar(); cell.contentEditable = 'true'; cell.textContent = rows[index][col]; const range = document.createRange(); range.selectNodeContents(cell); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); };
         cell.onblur = () => { const value = cell.textContent ?? ''; cell.contentEditable = 'false'; if (value !== rows[index][col]) { rows[index][col] = value; commit(); } cell.replaceChildren(); appendChildren(cell, parseMarkdown(value).children?.[0]?.children ?? [], this.context.host); };
-        cell.onbeforeinput = event => event.stopPropagation(); cell.onpaste = event => event.stopPropagation();
-        cell.oninput = event => { event.stopPropagation(); rows[index][col] = cell.textContent ?? ''; commit(!event.isTrusted); };
+        cell.onbeforeinput = event => { event.stopPropagation(); beforeInput = cursor(cell); }; cell.onpaste = event => event.stopPropagation();
+        cell.oninput = event => {
+          event.stopPropagation(); const after = cursor(cell), before = beforeInput ?? { ...after, value: rows[index][col] };
+          beforeInput = undefined; rows[index][col] = after.value; commit(!event.isTrusted, { before, after });
+        };
         cell.onkeydown = event => {
           event.stopPropagation();
           if (event.isComposing || event.keyCode === 229) return;
@@ -381,21 +420,32 @@ class BlockWidget extends WidgetType {
       if (focused && native) { anchor = offset(native.anchorNode, native.anchorOffset); head = offset(native.focusNode, native.focusOffset); }
       const r = Number(focused?.dataset.row ?? 0), c = Number(focused?.dataset.col ?? 0);
       rows = tableRows(ctx.source); align = ctx.node.align ?? [];
+      const saved = outer.state.field(tableCursor);
+      const value = saved?.value.replace(/(?<!\\)\|/g, '\\|').replace(/\n/g, ' ').trim();
+      const remembered = saved?.from === ctx.from && rows[saved.row]?.[saved.column] === value ? saved : null;
+      if (remembered) rows[remembered.row][remembered.column] = remembered.value;
+      const restoring = !!remembered && remembered !== appliedCursor;
       currentRow = Math.min(currentRow, rows.length - 1); currentCol = Math.min(currentCol, rows[0].length - 1);
       updateToolbar();
       const structural = table.rows.length !== rows.length || [...table.rows].some((row, index) => row.cells.length !== rows[index]?.length);
       if (!focused || structural) { if (focused) focused.onblur = null; draw(); }
-      const field = focused ? table.rows[Math.min(r, rows.length - 1)]?.cells[Math.min(c, rows[0].length - 1)] : null;
+      const field = restoring ? table.rows[remembered!.row]?.cells[remembered!.column] : focused ? table.rows[Math.min(r, rows.length - 1)]?.cells[Math.min(c, rows[0].length - 1)] : null;
       for (const row of [...table.rows]) for (const cell of [...row.cells]) {
         const next = rows[Number(cell.dataset.row)]?.[Number(cell.dataset.col)] ?? ''; cell.style.textAlign = align[Number(cell.dataset.col)] ?? '';
         if (cell !== field && cell.dataset.value !== next) { cell.replaceChildren(); appendChildren(cell, parseMarkdown(next).children?.[0]?.children ?? [], this.context.host); }
         cell.dataset.value = next;
       }
-      if (field && (structural || field.textContent !== rows[Number(field.dataset.row)][Number(field.dataset.col)])) {
-        const value = rows[Number(field.dataset.row)][Number(field.dataset.col)]; field.focus(); field.textContent = value; if (!field.firstChild) field.append(document.createTextNode(''));
+      if (field && (restoring || structural || field.textContent !== rows[Number(field.dataset.row)][Number(field.dataset.col)])) {
+        const value = rows[Number(field.dataset.row)][Number(field.dataset.col)];
+        if (document.activeElement !== field) field.focus();
+        if (field.textContent !== value) field.textContent = value;
+        if (!field.firstChild) field.append(document.createTextNode(''));
         const changes = ChangeSet.of(textEdits(oldText, value), oldText.length); const mappedAnchor = changes.mapPos(anchor, 1), mappedHead = changes.mapPos(head, anchor === head ? 1 : -1);
-        window.getSelection()?.setBaseAndExtent(field.firstChild!, mappedAnchor, field.firstChild!, mappedHead);
+        const nextAnchor = restoring ? remembered!.anchor : mappedAnchor, nextHead = restoring ? remembered!.head : mappedHead;
+        const current = nativeSelection(field);
+        if (current.anchor !== nextAnchor || current.head !== nextHead) restoreNativeSelection(field, nextAnchor, nextHead);
       }
+      appliedCursor = saved;
     };
   }
   updateDOM(frame: HTMLElement) {
@@ -527,7 +577,8 @@ function highlightSelection(view: EditorView): boolean {
 }
 export function wrapSelection(view: EditorView, left: string, right = left) {
   const selection = view.state.selection.main; const result = toggleMarkup(view.state.doc.toString(), selection.from, selection.to, left, right);
-  view.dispatch({ changes: result.changes, selection: { anchor: result.anchor, head: result.head }, annotations: isolateHistory.of('full'), scrollIntoView: true }); view.focus();
+  const reverse = selection.anchor > selection.head;
+  if (result.changes.length) view.dispatch({ changes: result.changes, selection: { anchor: reverse ? result.head : result.anchor, head: reverse ? result.anchor : result.head }, annotations: isolateHistory.of('full'), scrollIntoView: true }); view.focus();
 }
 function indentProse(view: EditorView, ast: MarkdownNode, outdent: boolean) {
   const { state } = view;
@@ -635,7 +686,11 @@ export function editorAction(view: EditorView, action: string): boolean {
   if (action === 'table') { insertBlock(view, '| 标题 | 标题 |\n| --- | --- |\n|  |  |', 2); return true; }
   if (action === 'toc') { insertBlock(view, '[toc]', 5); return true; }
   if (action === 'rule') { insertBlock(view, '---', 3); return true; }
-  if (action === 'clear-format') { const { from, to } = view.state.selection.main; view.dispatch({ changes: { from, to, insert: view.state.sliceDoc(from, to).replace(/\*\*|~~|==|`|\*/g, '') } }); return true; }
+  if (action === 'clear-format') {
+    const selection = view.state.selection.main, result = clearMarkup(view.state.doc.toString(), selection.from, selection.to), reverse = selection.anchor > selection.head;
+    if (result.changes.length) view.dispatch({ changes: result.changes, selection: { anchor: reverse ? result.head : result.anchor, head: reverse ? result.anchor : result.head }, annotations: isolateHistory.of('full'), scrollIntoView: true });
+    return true;
+  }
   return false;
 }
 function deleteParagraphBoundary(view: EditorView, backward: boolean): boolean {
@@ -708,7 +763,30 @@ function moveToOrderedBoundary(view: EditorView, key: 'Home' | 'ArrowLeft') {
   view.dispatch({ selection: { anchor: target }, scrollIntoView: true });
   return true;
 }
-function smartEnter(view: EditorView): boolean {
+function listContinuation(view: EditorView, ast: MarkdownNode) {
+  const selection = view.state.selection.main;
+  let item: MarkdownNode | undefined, proseParent: MarkdownNode | undefined;
+  walk(ast, (node, parent) => {
+    if (startOf(node) > selection.from || endOf(node) < selection.to) return;
+    if (node.type === 'listItem') item = node;
+    if (node.type === 'paragraph' || node.type === 'heading') proseParent = parent;
+  });
+  if (!item || proseParent !== item) return;
+  const row = view.state.doc.lineAt(startOf(item)), before = row.text.slice(0, startOf(item) - row.from);
+  const marker = /^([ \t]*)([-+*]|(\d+)([.)]))([ \t]+)(?:\[[ xX]\][ \t]+)?/.exec(row.text.slice(startOf(item) - row.from));
+  if (!marker) return;
+  const outer = before.replace(/[^\t >]/g, ' ');
+  const next = marker[3] ? `${Number(marker[3]) + 1}${marker[4]}` : marker[2];
+  return { first: row.number, indent: (before + marker[0]).replace(/[^\t >]/g, ' '), next: outer + marker[1] + next + marker[5] + (item.checked != null ? '[ ] ' : '') };
+}
+function softEnter(view: EditorView, ast: MarkdownNode) {
+  const { from, to } = view.state.selection.main;
+  const source = view.state.field(sourceField);
+  const insert = source ? '\n' : '  \n' + (listContinuation(view, ast)?.indent ?? '');
+  view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
+  return true;
+}
+function smartEnter(view: EditorView, ast: MarkdownNode): boolean {
   if (view.state.field(sourceField)) return false;
   const selection = view.state.selection.main;
   const row = view.state.doc.lineAt(selection.head);
@@ -716,6 +794,14 @@ function smartEnter(view: EditorView): boolean {
   if (selection.empty && heading) {
     if (!row.text.slice(heading[0].length).trim()) { view.dispatch({ changes: { from: row.from, to: row.to }, selection: { anchor: row.from }, annotations: isolateHistory.of('full') }); return true; }
     if (selection.head <= row.from + heading[0].length) { view.dispatch({ changes: { from: row.from, insert: '\n' }, selection: { anchor: row.from + 1 + heading[0].length }, annotations: isolateHistory.of('full'), scrollIntoView: true }); return true; }
+  }
+  if (selection.empty && selection.head === row.to && row.text.trim()) {
+    const list = listContinuation(view, view.state.field(compositionField) ? parseMarkdown(view.state.doc.toString()) : ast);
+    if (list && row.number > list.first) {
+      const insert = '\n' + list.next;
+      view.dispatch({ changes: { from: selection.head, insert }, selection: { anchor: selection.head + insert.length }, annotations: isolateHistory.of('full'), scrollIntoView: true });
+      return true;
+    }
   }
   if (!selection.empty || selection.head !== row.to) {
     if (selection.empty && insertNewlineContinueMarkup(view)) return true;
@@ -807,7 +893,7 @@ export class MarkdownEditor {
       return false;
     } });
     bindings.push({ key: 'Delete', run: view => deleteParagraphBoundary(view, false), preventDefault: false });
-    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, paragraphBreaks, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), orderedMouseSelection, highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: smartEnter }, { key: 'Shift-Enter', run(view) { const { from, to } = view.state.selection.main; const insert = view.state.field(sourceField) ? '\n' : '  \n'; view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } }); return true; } }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
+    this.view = new EditorView({ parent, state: EditorState.create({ doc: content, extensions: [sourceField, compositionField, paragraphBreaks, tableCursor, preview, keepCursorInListBody, history(), drawSelection(), dropCursor(), rectangularSelection(), orderedMouseSelection, highlightActiveLine(), EditorView.lineWrapping, markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }), syntaxHighlighting(defaultHighlightStyle), bracketMatching(), search({ top: true }), Prec.high(keymap.of([{ key: 'Enter', run: view => smartEnter(view, view.state.field(preview).ast) }, { key: 'Shift-Enter', run: view => softEnter(view, view.state.field(preview).ast) }, ...bindings, { key: 'Mod-h', run: openSearchPanel, preventDefault: true }])), keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]), EditorView.contentAttributes.of({ 'aria-label': 'Markdown 文档编辑区', spellcheck: 'false', autocapitalize: 'off' }), EditorView.editorAttributes.of(view => ({ class: 'markdown-editor', 'data-source': String(view.state.field(sourceField)) })),
       EditorView.updateListener.of(update => { if (update.docChanged && !update.state.field(compositionField)) host.changed(update.state.doc.toString()); }),
       EditorView.domEventHandlers({
         compositionstart(event, view) { if (event.isTrusted && view.hasFocus) { compositionSequence++; view.dispatch({ effects: compositionEffect.of(true) }); } return false; },
@@ -912,10 +998,7 @@ export class MarkdownEditor {
         field.focus({ preventScroll: true });
         const raw = view.state.sliceDoc(start, end), base = start + /^\|?[ \t]*/.exec(raw)![0].length, node = field.firstChild;
         if (node) {
-          const range = document.createRange(), length = node.textContent?.length ?? 0;
-          range.setStart(node, Math.max(0, Math.min(length, Math.min(anchor, head) - base)));
-          range.setEnd(node, Math.max(0, Math.min(length, Math.max(anchor, head) - base)));
-          const native = window.getSelection(); native?.removeAllRanges(); native?.addRange(range);
+          restoreNativeSelection(field, anchor - base, head - base);
         }
         return;
       }
@@ -932,6 +1015,26 @@ export class MarkdownEditor {
   insertImage(url: string, alt = '图片') { const label = alt.replace(/[\[\]\\\r\n]/g, ' '); const markdown = `![${label}](${url})`; insertBlock(this.view, markdown, markdown.length + 2); }
   action(action: string) { return editorAction(this.view, action); }
   highlightSelection() { return highlightSelection(this.view); }
+  captureFocus(): () => boolean {
+    const view = this.view, doc = view.state.doc, active = document.activeElement as HTMLElement | null;
+    const root = active?.closest<HTMLElement>('.md-block');
+    const nested = root ? widgetEditors.get(root) : undefined;
+    const code = active && nested?.dom.contains(active) ? nested : undefined;
+    const selection = code?.state.selection ?? view.state.selection;
+    const cell = active?.matches('th[contenteditable=true],td[contenteditable=true]') ? active : null;
+    const native = cell ? nativeSelection(cell) : null;
+    const field = active instanceof HTMLTextAreaElement ? active : null;
+    const textRange = field ? { start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection } : null;
+    return () => {
+      if (!view.dom.isConnected || view.state.doc !== doc || (active && !active.isConnected)) return false;
+      if (code && root && widgetEditors.get(root) === code) { code.dispatch({ selection }); code.focus(); }
+      else if (cell && native) { cell.focus({ preventScroll: true }); restoreNativeSelection(cell, native.anchor, native.head); }
+      else if (field && textRange) { field.focus({ preventScroll: true }); field.setSelectionRange(textRange.start, textRange.end, textRange.direction); }
+      else if (active && !view.dom.contains(active)) active.focus({ preventScroll: true });
+      else { view.dispatch({ selection }); view.focus(); }
+      return true;
+    };
+  }
   focus() { this.view.focus(); }
   destroy() { this.view.destroy(); }
 }
@@ -943,6 +1046,17 @@ export async function exportHTML(source: string, host: Host): Promise<string> {
     if (node.type === 'thematicBreak') return document.createElement('hr');
     if (node.type === 'code') { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = node.value ?? ''; pre.append(code); return pre; }
     if (node.type === 'table') { const table = document.createElement('table'); (node.children ?? []).forEach((row, index) => { const tr = document.createElement('tr'); (row.children ?? []).forEach((cell, col) => { const td = document.createElement(index ? 'td' : 'th'); td.style.textAlign = node.align?.[col] ?? ''; for (const child of cell.children ?? []) td.append(renderNode(child, host)); tr.append(td); }); table.append(tr); }); return table; }
+    if (['list', 'listItem', 'blockquote'].includes(node.type)) {
+      const element = document.createElement(node.type === 'list' ? node.ordered ? 'ol' : 'ul' : node.type === 'listItem' ? 'li' : 'blockquote');
+      if (node.type === 'list' && node.ordered) (element as HTMLOListElement).start = node.start ?? 1;
+      const task = node.type === 'listItem' && node.checked != null;
+      if (task) { const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.disabled = true; checkbox.defaultChecked = checkbox.checked = !!node.checked; checkbox.setAttribute('aria-label', node.checked ? '已完成' : '未完成'); element.append(checkbox); }
+      for (const [index, child] of (node.children ?? []).entries()) {
+        if (task && index === 0 && child.type === 'paragraph') { const text = document.createElement('span'); appendChildren(text, child.children ?? [], host); element.append(text); }
+        else element.append(render(child));
+      }
+      return element;
+    }
     return renderNode(node, host);
   }; for (const child of parseMarkdown(source).children ?? []) {
     if (child.type === 'yaml') continue;

@@ -69,8 +69,11 @@ function changed(id: string, content: string) {
   doc.content = content; doc.revision++; doc.dirty = true; doc.updatedAt = Date.now(); if (!doc.error) doc.status = 'draft';
   bridge.updateDocument(id, content, doc.revision); scheduleRender();
 }
-function flushAll() {
-  (document.activeElement as HTMLElement)?.blur();
+function flushAll(keepEditing = false) {
+  const focused = document.activeElement as HTMLElement | null;
+  // These controls already commit on input. Saving and exporting should not
+  // blur them and discard the actual cell/code caret just to flush the model.
+  if (!keepEditing || compositionTarget || !focused?.closest('.cm-content,th[contenteditable=true],td[contenteditable=true],.md-math textarea')) focused?.blur();
   for (const [id, slot] of slots) changed(id, slot.editor.content);
 }
 function media(id: string, url: string) {
@@ -477,10 +480,10 @@ function renderSidebar() {
     if (!collapsed) { collapsed = new Set(); collapsedHeadings.set(doc.id, collapsed); }
     const matching = outline.filter(heading => matches(heading.text));
     if (matching.length) {
-      const tree = outlineTree(matching, collapsed, heading => {
+      const tree = outlineTree(outline, collapsed, heading => {
         const editor = activeEditor(); if (!editor) return;
         editor.view.dispatch({ selection: { anchor: heading.offset }, effects: EditorView.scrollIntoView(heading.offset, { y: 'start' }) }); editor.focus();
-      }, !!query);
+      }, !!query, heading => matches(heading.text));
       container.append(tree);
       if (outlineFocus) [...tree.querySelectorAll<HTMLElement>('[data-outline-key]')].find(node => node.dataset.outlineKey === outlineFocus && !node.closest('[hidden]'))?.focus({ preventScroll: true });
       container.scrollTop = previousScroll;
@@ -813,8 +816,12 @@ async function saveDocument(id: string, mode: SaveMode) {
     }
     if (saveConflict.open || !workspace.documents.some(doc => doc.id === id)) return { ok: false, canceled: true };
     const closed = new Promise<string>(resolve => { resolveSaveConflict = resolve; });
+    const editor = activeEditor(), documentId = workspace.activeId, origin = document.activeElement;
+    const restoreFocus = editor?.captureFocus();
     saveConflict.showModal();
     const choice = await closed;
+    if (workspace.activeId === documentId && activeEditor() === editor && !document.querySelector('dialog[open]') &&
+        (document.activeElement === origin || document.activeElement === document.body || saveConflict.contains(document.activeElement))) restoreFocus?.();
     if (choice === 'save-as' || choice === 'overwrite-conflict') {
       const resolved = await bridge.saveDocument(id, choice);
       if (resolved.ok && choice === 'save-as') await refreshFolder();
@@ -822,7 +829,6 @@ async function saveDocument(id: string, mode: SaveMode) {
     }
     return { ok: false, canceled: true };
   });
-  if (!document.querySelector('dialog[open]')) activeEditor()?.focus();
 }
 function preferences() { settings.open(); }
 function quickOpen() { $<HTMLDialogElement>('#quick-open').showModal(); reveal($('#quick-open'), 4); $<HTMLInputElement>('#quick-input').value = ''; renderQuick(); $<HTMLInputElement>('#quick-input').focus(); }
@@ -862,7 +868,7 @@ function formatCell(action: string) {
 async function execute(action: string, value?: string) {
   if (['new', 'open', 'save', 'save-as', 'close-tab', 'detach', 'new-window', 'export-html', 'export-pdf'].includes(action)) await Promise.allSettled([...pendingImages]);
   const doc = activeDocument(); const editor = activeEditor();
-  if (['new', 'open', 'save', 'save-as', 'close-tab', 'detach', 'new-window', 'export-html', 'export-pdf'].includes(action)) flushAll();
+  if (['new', 'open', 'save', 'save-as', 'close-tab', 'detach', 'new-window', 'export-html', 'export-pdf'].includes(action)) flushAll(['save', 'save-as', 'export-html', 'export-pdf'].includes(action));
   if (action === 'new') return run(() => bridge.newDocument()); if (action === 'open') return run(() => bridge.openDocuments());
   if (action === 'save' || action === 'save-as') { if (doc) return saveDocument(doc.id, action); return; }
   if (action === 'rename') {
@@ -911,8 +917,20 @@ async function execute(action: string, value?: string) {
   if (action === 'next-tab' || action === 'previous-tab') { flushAll(); const index = workspace.documents.findIndex(doc => doc.id === workspace.activeId); const next = workspace.documents[(index + (action === 'next-tab' ? 1 : -1) + workspace.documents.length) % workspace.documents.length]; if (next) return run(() => bridge.activateDocument(next.id)); return; }
   if (action === 'insert-image' && doc && editor) { const result = await bridge.insertImage(doc.id); if (result.message) toast(result.message); if (result.url) editor.insertImage(result.url); return; }
   if (action === 'export-pdf' && doc) {
-    if (!printPreview) { const { PrintPreview } = await import('./print-preview'); printPreview = new PrintPreview(id => workspace.documents.find(doc => doc.id === id), media, () => activeEditor()?.focus()); }
-    printPreview.open(doc, workspace.preferences.print); return;
+    if (!editor) return;
+    const documentId = doc.id, origin = document.activeElement;
+    let restoreFocus = editor.captureFocus();
+    const current = () => workspace.activeId === documentId && activeEditor() === editor;
+    if (!printPreview) {
+      const { PrintPreview } = await import('./print-preview');
+      if (!current() || document.activeElement !== origin || document.querySelector('dialog[open]')) return;
+      printPreview = new PrintPreview(id => workspace.documents.find(doc => doc.id === id), media);
+    }
+    if (!current() || document.activeElement !== origin || document.querySelector('dialog[open]')) return;
+    restoreFocus = editor.captureFocus();
+    printPreview.open(doc, workspace.preferences.print, () => {
+      if (current() && !document.querySelector('dialog[open]')) restoreFocus();
+    }); return;
   }
   if (action === 'export-html' && doc) {
     const workbuddy = workspace.preferences.theme === 'workbuddy';
@@ -930,7 +948,7 @@ async function execute(action: string, value?: string) {
       blockquote{border-left:4px solid var(--border);margin-left:0;padding-left:16px;color:var(--muted)}img,svg{max-width:100%;height:auto}.katex-html{display:none}math{font-size:1.1em}p{margin:1em 0}
       ${extraStyle}
       body{box-sizing:border-box;width:100%;max-width:${width}px;padding-inline:clamp(16px,5vw,42px);overflow-wrap:anywhere}
-      table{width:100%;margin:12px 0;border-collapse:collapse}td,th{overflow-wrap:anywhere}
+      table{width:100%;margin:12px 0;border-collapse:collapse}td,th{overflow-wrap:anywhere}li>input[type=checkbox]{accent-color:var(--ui-accent);margin-inline:0 .45em}
     </style></head><body>${body}</body></html>`;
     return run(() => bridge.exportHtml(doc.id, html));
   }

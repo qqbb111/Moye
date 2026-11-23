@@ -24,7 +24,8 @@ export class PrintPreview {
   private id = '';
   private request?: { id: string; generation: number; documentId: string; abort: AbortController; final: boolean };
   private lastLayout: PrintLayout = 'portrait';
-  constructor(private read: (id: string) => DocumentView | undefined, private media: (id: string, url: string) => string, private focus: () => void) {
+  private returnFocus?: () => void;
+  constructor(private read: (id: string) => DocumentView | undefined, private media: (id: string, url: string) => string) {
     this.dialog.id = 'print-preview'; this.dialog.setAttribute('aria-label', '打印预览'); this.dialog.tabIndex = -1;
     this.dialog.innerHTML = `<header class="print-header"><div><strong>打印预览</strong><span id="print-document"></span></div><button id="print-close" aria-label="关闭打印预览">${icon('close')}</button></header>
       <div class="print-body"><aside class="print-settings"><label>纸张与版式<select id="print-layout"><option value="portrait">A4 纵向 · 单栏</option><option value="landscape-two-column">A4 横向 · 双栏</option></select></label><label>代码配色<select id="print-color"><option value="mono">黑白省墨</option><option value="light">浅色语法高亮</option></select></label><label>代码字号 <span class="print-unit">pt</span><input id="print-font" type="number" min="8" max="12" step="0.5"></label><label class="print-checkbox"><input id="print-lines" type="checkbox">显示代码行号</label><div id="print-stale" hidden>原文已更新<button id="print-refresh">刷新预览</button></div><button id="print-save" disabled>保存 PDF…</button><p id="print-status" role="alert" hidden></p></aside>
@@ -48,11 +49,16 @@ export class PrintPreview {
     new ResizeObserver(() => { const width = this.get('#print-pages').clientWidth; if (width === previousWidth) return; previousWidth = width; clearTimeout(resizeTimer); if (this.dialog.open && this.pdf && !this.get<HTMLButtonElement>('#print-save').disabled && this.get<HTMLSelectElement>('#print-zoom').value === 'fit') resizeTimer = setTimeout(() => void this.paintPages(), 100); }).observe(this.get('#print-pages'));
     this.get('#print-refresh').onclick = () => { const next = this.read(this.snapshot.id); if (next) { this.snapshot = { ...next }; this.observe(next); this.get('#print-document').textContent = next.title; this.schedule(0); } };
     this.get('#print-save').onclick = () => void this.save();
-    this.dialog.addEventListener('close', () => { if (this.dialog.open) return; this.dispose(); this.focus(); });
+    this.dialog.addEventListener('close', () => {
+      if (this.dialog.open) return;
+      const returnFocus = this.returnFocus; this.returnFocus = undefined;
+      this.dispose(); returnFocus?.();
+    });
   }
   private get<T extends HTMLElement = HTMLElement>(selector: string) { return this.dialog.querySelector<T>(selector)!; }
-  open(document: DocumentView, preferences?: PrintPreferences) {
-    if (this.dialog.open) { this.dialog.close(); this.dispose(); }
+  open(document: DocumentView, preferences?: PrintPreferences, returnFocus?: () => void) {
+    if (this.dialog.open) { this.returnFocus = undefined; this.dialog.close(); this.dispose(); }
+    this.returnFocus = returnFocus;
     this.snapshot = { ...document }; this.preferences = printPreferences(preferences); const options = optionsFromPreferences(this.preferences); this.lastLayout = options.layout;
     this.get<HTMLSelectElement>('#print-layout').value = options.layout; this.get<HTMLSelectElement>('#print-color').value = options.color;
     this.get<HTMLInputElement>('#print-font').value = String(options.codeFontPt); this.get<HTMLInputElement>('#print-lines').checked = options.lineNumbers;

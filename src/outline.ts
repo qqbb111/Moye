@@ -4,7 +4,7 @@ import { icon } from './icons';
 type Heading = ReturnType<typeof headings>[number];
 type Branch = { heading: Heading; children: Branch[] };
 
-export function outlineTree(items: Heading[], collapsed: Set<string>, activate: (heading: Heading) => void, searching: boolean) {
+export function outlineTree(items: Heading[], collapsed: Set<string>, activate: (heading: Heading) => void, searching: boolean, matches?: (heading: Heading) => boolean) {
   const roots: Branch[] = [];
   const ancestors: Branch[] = [];
   for (const heading of items) {
@@ -13,6 +13,12 @@ export function outlineTree(items: Heading[], collapsed: Set<string>, activate: 
     (ancestors.at(-1)?.children ?? roots).push(branch);
     ancestors.push(branch);
   }
+  const filter = (branches: Branch[]): Branch[] => branches.flatMap(branch => {
+    const children = filter(branch.children);
+    return matches!(branch.heading) || children.length ? [{ heading: branch.heading, children }] : [];
+  });
+  // Establish parents before filtering so a match stays under its real chapter.
+  const displayed = matches ? filter(roots) : roots;
 
   const tree = document.createElement('div');
   tree.className = 'outline-tree'; tree.role = 'tree'; tree.setAttribute('aria-label', '文档大纲');
@@ -86,7 +92,7 @@ export function outlineTree(items: Heading[], collapsed: Set<string>, activate: 
       };
     });
   };
-  append(tree, roots, 1);
+  append(tree, displayed, 1);
   if (tree.firstElementChild) (tree.firstElementChild as HTMLElement).tabIndex = 0;
   tree.addEventListener('focusin', event => {
     const focused = (event.target as HTMLElement).closest('[role="treeitem"]');

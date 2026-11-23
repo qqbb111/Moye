@@ -1184,7 +1184,7 @@ test('侧栏筛选、拖动及键盘调整宽度和阅读宽度在重启后保�
     const native = await app.application.browserWindow(app.page); await native.evaluate(window => { window.setBounds({ width: 1200, height: 850 }); window.showInactive(); });
     await setContent(app.page, raw); await execute(app.page, 'outline');
     await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(3); await app.page.getByRole('searchbox', { name: '筛选侧栏' }).fill('网络');
-    await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(1); await expect(app.page.locator('#sidebar-content')).toContainText('网络通信');
+    await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(2); await expect(app.page.locator('#sidebar-content')).toContainText('总览'); await expect(app.page.locator('#sidebar-content')).toContainText('网络通信');
     await app.page.getByRole('searchbox', { name: '筛选侧栏' }).press('Escape'); await expect(app.page.locator('#sidebar-content .sidebar-row')).toHaveCount(3);
     const separator = app.page.getByRole('separator', { name: '调整侧栏宽度' }); const box = (await separator.boundingBox())!;
     await separator.hover(); await expect(separator).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)'); expect(await separator.evaluate(element => getComputedStyle(element, '::after').width)).toBe('1px');
@@ -2113,7 +2113,9 @@ test('大纲折叠按文档保留，搜索和正文编辑不会清除折叠状�
     await expect(search).toHaveAttribute('aria-expanded', 'false');
     const filter = page.getByRole('searchbox', { name: '筛选侧栏' });
     await filter.fill('BFS');
-    await expect(tree.getByRole('treeitem')).toHaveCount(1);
+    await expect(tree.getByRole('treeitem')).toHaveCount(3);
+    await expect(tree.getByRole('treeitem', { name: '笔记', exact: true })).toBeVisible();
+    await expect(search).toHaveAttribute('aria-expanded', 'true');
     await expect(bfs).toBeVisible();
     await filter.fill('');
     await expect(search).toHaveAttribute('aria-expanded', 'false');

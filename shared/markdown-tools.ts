@@ -83,21 +83,105 @@ export function toggleMarkup(source: string, from: number, to: number, left: str
   }
   const selected = source.slice(from, to);
   const result = (start: number, end: number, insert: string, anchor: number, head: number) => ({ changes: textEdits(source, source.slice(0, start) + insert + source.slice(end)), anchor, head });
-  if (selected.length >= left.length + right.length && selected.startsWith(left) && selected.endsWith(right)) return result(from, to, selected.slice(left.length, -right.length), from, to - left.length - right.length);
-  if (from >= left.length && source.slice(from - left.length, from) === left && source.slice(to, to + right.length) === right) return result(from - left.length, to + right.length, selected, from - left.length, to - left.length);
   if (left === '**' || left === '*') {
+    if (selected.length) {
+      const leading = /^\s*/.exec(selected)![0].length, trailing = /\s*$/.exec(selected)![0].length;
+      if (leading === selected.length) return { changes: [], anchor: from, head: to };
+      if (leading || trailing) {
+        const trimmed = toggleMarkup(source, from + leading, to - trailing, left, right);
+        return trimmed.changes.length ? trimmed : { changes: [], anchor: from, head: to };
+      }
+    }
     let enclosing: MarkdownNode | undefined;
-    const visit = (node: MarkdownNode) => { if (node.type === (left === '**' ? 'strong' : 'emphasis') && startOf(node) <= from && endOf(node) >= to) enclosing = node; for (const child of node.children ?? []) visit(child); }; visit(parseMarkdown(source));
+    let blocks = 0;
+    const visit = (node: MarkdownNode) => {
+      if (['paragraph', 'heading', 'tableCell'].includes(node.type) && startOf(node) < to && endOf(node) > from) blocks++;
+      if (node.type === (left === '**' ? 'strong' : 'emphasis') && startOf(node) <= from && endOf(node) >= to) enclosing = node;
+      for (const child of node.children ?? []) visit(child);
+    }; visit(parseMarkdown(source));
+    if (blocks > 1) return { changes: [], anchor: from, head: to };
     if (enclosing) {
       const start = startOf(enclosing), end = endOf(enclosing); const marker = left; const innerStart = start + left.length, innerEnd = end - left.length;
       if (from >= innerStart && to <= innerEnd && from < to && enclosing.children?.every(child => child.type === 'text')) {
-        const before = source.slice(innerStart, from), after = source.slice(to, innerEnd); const prefix = before ? marker + before + marker : ''; const suffix = after ? marker + after + marker : '';
+        const wrap = (text: string) => {
+          const leading = /^\s*/.exec(text)![0], trailing = /\s*$/.exec(text)![0];
+          return text.trim() ? leading + marker + text.slice(leading.length, text.length - trailing.length) + marker + trailing : text;
+        };
+        const before = source.slice(innerStart, from), after = source.slice(to, innerEnd); const prefix = wrap(before), suffix = wrap(after);
         return result(start, end, prefix + selected + suffix, start + prefix.length, start + prefix.length + selected.length);
       }
       return result(start, end, source.slice(innerStart, innerEnd), start + Math.max(0, Math.min(innerEnd - innerStart, from - innerStart)), start + Math.max(0, Math.min(innerEnd - innerStart, to - innerStart)));
     }
+  } else {
+    if (selected.length >= left.length + right.length && selected.startsWith(left) && selected.endsWith(right)) return result(from, to, selected.slice(left.length, -right.length), from, to - left.length - right.length);
+    if (from >= left.length && source.slice(from - left.length, from) === left && source.slice(to, to + right.length) === right) return result(from - left.length, to + right.length, selected, from - left.length, to - left.length);
   }
   return result(from, to, left + selected + right, from + left.length, to + left.length);
+}
+
+export function clearMarkup(source: string, from: number, to: number): { changes: TextEdit[]; anchor: number; head: number } {
+  if (from === to) return { changes: [], anchor: from, head: to };
+  const removals: Array<{ from: number; to: number }> = [], insertions = new Map<number, string>();
+  const insert = (at: number, text: string) => insertions.set(at, (insertions.get(at) ?? '') + text);
+  const frame = (start: number, innerStart: number, innerEnd: number, end: number, split = false) => {
+    if (from >= innerEnd || to <= innerStart) return;
+    const opening = source.slice(start, innerStart), closing = source.slice(innerEnd, end);
+    if (!split || (from <= innerStart && to >= innerEnd)) {
+      removals.push({ from: start, to: innerStart }, { from: innerEnd, to: end }); return;
+    }
+    const selectedStart = Math.max(from, innerStart), selectedEnd = Math.min(to, innerEnd);
+    const before = source.slice(innerStart, selectedStart), after = source.slice(selectedEnd, innerEnd);
+    const beforeEnd = selectedStart - /\s*$/.exec(before)![0].length;
+    const afterStart = selectedEnd + /^\s*/.exec(after)![0].length;
+    if (beforeEnd > innerStart) insert(beforeEnd, closing); else removals.push({ from: start, to: innerStart });
+    if (afterStart < innerEnd) insert(afterStart, opening); else removals.push({ from: innerEnd, to: end });
+  };
+  const custom = /(==)([^=\n]+)\1|(\^)([^\^\n]+)\3|(?<!~)(~)([^~\n]+)\5(?!~)/g;
+  const visit = (node: MarkdownNode) => {
+    if (['code', 'math', 'inlineMath', 'yaml', 'image', 'imageReference', 'definition'].includes(node.type)) return;
+    const start = startOf(node), end = endOf(node), raw = source.slice(start, end);
+    if (node.type === 'inlineCode') {
+      const width = /^`+/.exec(raw)?.[0].length ?? 1; frame(start, start + width, end - width, end); return;
+    }
+    if (['strong', 'emphasis', 'delete'].includes(node.type) && node.children?.length) {
+      const innerStart = startOf(node.children[0]), innerEnd = endOf(node.children.at(-1)!);
+      const simple = node.children.every(child => child.type === 'text') && !source.slice(innerStart, innerEnd).match(custom);
+      frame(start, innerStart, innerEnd, end, simple);
+    }
+    if (node.type === 'text') for (const match of raw.matchAll(custom)) {
+      const at = start + match.index!, width = (match[1] ?? match[3] ?? match[5]).length;
+      if ((/\\*$/.exec(source.slice(0, at))![0].length % 2) === 0) frame(at, at + width, at + match[0].length - width, at + match[0].length);
+    }
+    const tags: Array<{ tag: string; node: MarkdownNode }> = [];
+    for (const child of node.children ?? []) {
+      const tag = child.type === 'html' ? /^<(\/?)(u|sub|sup|mark)>$/i.exec(child.value ?? '') : null;
+      if (tag && !tag[1]) tags.push({ tag: tag[2].toLowerCase(), node: child });
+      else if (tag && tags.at(-1)?.tag === tag[2].toLowerCase()) {
+        const opening = tags.pop()!.node;
+        frame(startOf(opening), endOf(opening), startOf(child), endOf(child));
+      }
+      visit(child);
+    }
+  }; visit(parseMarkdown(source));
+  const merged: Array<{ from: number; to: number }> = [];
+  for (const range of removals.sort((a, b) => a.from - b.from || a.to - b.to)) {
+    const previous = merged.at(-1);
+    if (previous && previous.to >= range.from) previous.to = Math.max(previous.to, range.to); else merged.push({ ...range });
+  }
+  const edits = [...merged.map(range => ({ ...range, insert: '' })), ...[...insertions].map(([at, insert]) => ({ from: at, to: at, insert }))];
+  const changes = textEdits(source, applyEdits(source, edits));
+  const mapping = [...edits].sort((a, b) => a.from - b.from || a.to - b.to);
+  const map = (position: number, assoc: number) => {
+    let delta = 0;
+    for (const edit of mapping) {
+      if (position < edit.from || (position === edit.from && assoc < 0)) break;
+      if (position > edit.to || (position === edit.to && edit.from !== edit.to)) delta += edit.insert.length - (edit.to - edit.from);
+      else if (position === edit.from && edit.from === edit.to) { if (assoc > 0) delta += edit.insert.length; }
+      else return edit.from + delta + (assoc > 0 ? edit.insert.length : 0);
+    }
+    return position + delta;
+  };
+  return { changes, anchor: map(from, 1), head: map(to, -1) };
 }
 
 export function markdownStatistics(source: string, ast = parseMarkdown(source)) {
