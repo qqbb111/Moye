@@ -36,13 +36,13 @@
 导出 PDF 时使用独立的纸张排版，编辑器中的深色主题也可以输出为白底黑字。适合打印算法竞赛模板、课程笔记和技术速查资料。
 
 <table>
-  <thead><tr><th align="left" nowrap>打印选项</th><th align="left" width="1000">可选设置</th></tr></thead>
+  <thead><tr><th align="center" width="500">打印选项</th><th align="center" width="500">可选设置</th></tr></thead>
   <tbody>
-    <tr><td nowrap>纸张与版式</td><td>A4 纵向单栏、A4 横向双栏</td></tr>
-    <tr><td nowrap>代码配色</td><td>黑白省墨、浅色语法高亮</td></tr>
-    <tr><td nowrap>代码字号</td><td>8–12 pt，单栏和双栏分别记住设置</td></tr>
-    <tr><td nowrap>代码行号</td><td>按需显示或隐藏</td></tr>
-    <tr><td nowrap>页脚</td><td>文档名、当前页与总页数</td></tr>
+    <tr><td align="center" width="50%">纸张与版式</td><td align="center" width="50%">A4 纵向单栏、A4 横向双栏</td></tr>
+    <tr><td align="center" width="50%">代码配色</td><td align="center" width="50%">黑白省墨、浅色语法高亮</td></tr>
+    <tr><td align="center" width="50%">代码字号</td><td align="center" width="50%">8–12 pt，单栏和双栏分别记住设置</td></tr>
+    <tr><td align="center" width="50%">代码行号</td><td align="center" width="50%">按需显示或隐藏</td></tr>
+    <tr><td align="center" width="50%">页脚</td><td align="center" width="50%">文档名、当前页与总页数</td></tr>
   </tbody>
 </table>
 
@@ -74,11 +74,11 @@
 草稿、标签和设置的恢复目录：<code>%APPDATA%\Moye\recovery</code>
 
 <table>
-  <thead><tr><th align="left" nowrap>内容</th><th align="left" width="1000">恢复目录内的位置</th></tr></thead>
+  <thead><tr><th align="center" width="500">内容</th><th align="center" width="500">恢复目录内的位置</th></tr></thead>
   <tbody>
-    <tr><td nowrap>记录</td><td><code>workspace.json</code></td></tr>
-    <tr><td nowrap>备份</td><td><code>workspace.json.bak</code></td></tr>
-    <tr><td nowrap>图片</td><td><code>assets</code></td></tr>
+    <tr><td align="center" width="50%">记录</td><td align="center" width="50%"><code>workspace.json</code></td></tr>
+    <tr><td align="center" width="50%">备份</td><td align="center" width="50%"><code>workspace.json.bak</code></td></tr>
+    <tr><td align="center" width="50%">图片</td><td align="center" width="50%"><code>assets</code></td></tr>
   </tbody>
 </table>
 
@@ -89,14 +89,14 @@
 ## 常用快捷键
 
 <table>
-  <thead><tr><th align="left" nowrap>操作</th><th align="left" width="1000">默认快捷键</th></tr></thead>
+  <thead><tr><th align="center" width="500">操作</th><th align="center" width="500">默认快捷键</th></tr></thead>
   <tbody>
-    <tr><td nowrap>切换源码与排版</td><td><code>Ctrl+/</code></td></tr>
-    <tr><td nowrap>快速打开文档</td><td><code>Ctrl+P</code></td></tr>
-    <tr><td nowrap>插入表格</td><td><code>Ctrl+T</code></td></tr>
-    <tr><td nowrap>插入代码块</td><td><code>Ctrl+Shift+K</code></td></tr>
-    <tr><td nowrap>整理中文排版</td><td><code>Alt+Shift+F</code></td></tr>
-    <tr><td nowrap>打开设置</td><td><code>Ctrl+,</code></td></tr>
+    <tr><td align="center" width="50%">切换源码与排版</td><td align="center" width="50%"><code>Ctrl+/</code></td></tr>
+    <tr><td align="center" width="50%">快速打开文档</td><td align="center" width="50%"><code>Ctrl+P</code></td></tr>
+    <tr><td align="center" width="50%">插入表格</td><td align="center" width="50%"><code>Ctrl+T</code></td></tr>
+    <tr><td align="center" width="50%">插入代码块</td><td align="center" width="50%"><code>Ctrl+Shift+K</code></td></tr>
+    <tr><td align="center" width="50%">整理中文排版</td><td align="center" width="50%"><code>Alt+Shift+F</code></td></tr>
+    <tr><td align="center" width="50%">打开设置</td><td align="center" width="50%"><code>Ctrl+,</code></td></tr>
   </tbody>
 </table>
 
